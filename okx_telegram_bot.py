@@ -3,13 +3,20 @@
 """
 OKX 선물 포지션 <-> 텔레그램 특정 토픽 연동 봇
 
-- OKX 계좌의 현재 포지션을 조회해 직전 실행 시점(state.json)과 비교한다.
-- 비교 결과를 [신규 진입 / 추가매수 / 부분청산 / 전체청산] 4가지 이벤트로 분류해
-  텔레그램 그룹의 지정된 토픽(message_thread_id)에 기록을 남긴다.
-- 토픽 상단에는 "현재 보유 포지션 요약" 메시지 1개를 고정해두고, 상태가 바뀔 때마다
-  그 메시지 내용만 계속 수정(edit)한다. 개별 이벤트는 별도의 불변 로그 메시지로 쌓인다.
-- 정확도를 속도보다 우선하는 설계다. 실시간 웹소켓 대신 주기적 폴링(권장: 5분 간격)으로
-  전체 스냅샷을 매번 새로 받아 비교하므로, 연결 끊김으로 인한 이벤트 유실이 없다.
+- "매매할 때마다 빠짐없이 기록되는 것"을 최우선 목표로 삼는다. 이를 위해 포지션
+  스냅샷의 순간적인 증감 비교가 아니라, OKX의 체결 내역(fills-history)을 직전
+  체크포인트 이후로 전부 가져와 체결 하나하나를 순서대로 재생(replay)하며 이벤트를
+  만든다. 같은 폴링 구간 안에 여러 번 매매해도, 서로 상쇄되는 매매를 해도 전부
+  개별 이벤트로 남는다.
+- 체결을 [신규 진입 / 추가매수 / 부분청산 / 전체청산] 4가지로 분류해 텔레그램
+  그룹의 지정된 토픽(message_thread_id)에 기록을 남긴다. 레버리지만 바뀌고
+  수량 변화가 없는 경우는 체결 기록에 남지 않으므로, 이 부분만 별도로 포지션
+  스냅샷을 비교해 감지한다.
+- 토픽 상단에는 "진행중인 포지션" 요약 메시지 1개를 고정해두고, 상태가 바뀔 때마다
+  그 메시지 내용만 계속 수정(edit)한다. 개별 이벤트는 별도의 불변 로그 메시지로 쌓이며,
+  같은 포지션에 속한 이벤트는 최초 진입 메시지에 답장(reply)으로 이어붙는다.
+- GitHub Actions로 몇 분 간격 폴링하는 구조라 완전한 실시간은 아니지만, 폴링 사이에
+  일어난 모든 체결을 하나도 빠짐없이 반영하는 것을 정확도의 핵심으로 삼는다.
 
 사용 전 반드시 확인할 것
 1) OKX API 키는 반드시 "읽기 전용" 권한으로 발급할 것 (출금/거래 권한 부여 금지).
@@ -110,6 +117,95 @@ def get_positions_history(inst_id: str, limit: int = 5) -> list[dict]:
     )
 
 
+def get_fills_history(inst_type: str, before: str | None = None, limit: int = 100) -> list[dict]:
+    """체결(거래 실행) 내역. before=billId를 주면 그 billId보다 새로운 체결만 반환."""
+    params = {"instType": inst_type, "limit": str(limit)}
+    if before:
+        params["before"] = before
+    return okx_request("GET", "/api/v5/trade/fills-history", params)
+
+
+def get_new_fills(last_bill_id: str | None) -> list[dict]:
+    """직전 체크포인트 이후 발생한 모든 체결을, 오래된 순서로 정렬해 반환한다.
+    체크포인트가 없으면(비정상 상황) 과거 이력을 소급 처리하지 않기 위해 빈 리스트를 반환."""
+    if not last_bill_id:
+        return []
+    all_fills = []
+    for inst_type in INST_TYPES:
+        try:
+            all_fills.extend(get_fills_history(inst_type, before=last_bill_id, limit=100))
+        except Exception as e:
+            print(f"체결 내역 조회 실패 ({inst_type}): {e}")
+    all_fills.sort(key=lambda f: int(f["billId"]))
+    return all_fills
+
+
+def get_latest_bill_id() -> str | None:
+    """최초 실행 시 체크포인트를 잡기 위한, 가장 최근 체결의 billId."""
+    latest = None
+    for inst_type in INST_TYPES:
+        try:
+            fills = get_fills_history(inst_type, limit=1)
+        except Exception:
+            fills = []
+        if fills:
+            bid = fills[0]["billId"]
+            if latest is None or int(bid) > int(latest):
+                latest = bid
+    return latest
+
+
+# ---------------------------------------------------------------------------
+# 계약 수 -> 실제 수량 환산
+# ---------------------------------------------------------------------------
+# OKX의 `pos`/`fillSz`는 "계약(contract) 개수"이지, 실제 코인/주식 수량이 아니다.
+# 계약 1개가 실제로 얼마만큼의 기초자산에 해당하는지는 상품마다 다른
+# ctVal(계약 액면가) x ctMult(승수) 값을 곱해야 알 수 있다.
+# 예: BTC-USDT-SWAP은 1계약 = 0.01 BTC인 식이라, 계약 수를 그대로 실제 수량인
+# 것처럼 보여주면 실제보다 훨씬 크게(혹은 작게) 오인하기 쉽다.
+_INSTRUMENT_CACHE: dict[str, dict] = {}
+
+
+def _get_instrument_meta(inst_id: str, inst_type: str = "SWAP") -> dict:
+    if inst_id in _INSTRUMENT_CACHE:
+        return _INSTRUMENT_CACHE[inst_id]
+    try:
+        # 공개 엔드포인트라 서명 불필요
+        resp = requests.get(
+            f"{OKX_BASE_URL}/api/v5/public/instruments",
+            params={"instType": inst_type, "instId": inst_id},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        meta = data["data"][0] if data.get("code") == "0" and data.get("data") else {}
+    except Exception:
+        meta = {}
+    _INSTRUMENT_CACHE[inst_id] = meta
+    return meta
+
+
+def contracts_to_actual(inst_id: str, contracts) -> tuple[float | None, str]:
+    """계약 개수를 실제 기초자산 수량으로 환산. (수량, 단위통화) 반환.
+    상품 정보를 못 가져오면 (None, "") 반환 - 호출부에서 계약 수만 표기하도록 폴백."""
+    meta = _get_instrument_meta(inst_id)
+    ct_val = meta.get("ctVal")
+    if not ct_val:
+        return None, ""
+    ct_mult = float(meta.get("ctMult") or 1)
+    qty = abs(float(contracts)) * float(ct_val) * ct_mult
+    return qty, meta.get("ctValCcy", "")
+
+
+def qty_line(inst_id: str, contracts, label: str = "수량") -> str:
+    """'수량: 6.18계약 (0.06 BTC)' 형태의 표시용 한 줄을 만든다."""
+    n_contracts = fmt_num(contracts)
+    actual, ccy = contracts_to_actual(inst_id, contracts)
+    if actual is not None and ccy:
+        return f"{label}: {n_contracts}계약 ({fmt_num(actual)} {ccy})"
+    return f"{label}: {n_contracts}계약"
+
+
 # ---------------------------------------------------------------------------
 # 텔레그램 API
 # ---------------------------------------------------------------------------
@@ -162,7 +258,7 @@ def tg_pin(message_id: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 상태 저장 (직전 포지션 스냅샷)
+# 상태 저장 (직전 포지션 스냅샷 + 체결 체크포인트)
 # ---------------------------------------------------------------------------
 def load_state() -> dict:
     if not os.path.exists(STATE_PATH):
@@ -177,10 +273,9 @@ def save_state(state: dict) -> None:
 
 
 def position_key(p: dict) -> str:
-    pos_id = p.get("posId")
-    if pos_id:
-        return pos_id
-    return f"{p['instId']}|{p['posSide']}|{p['mgnMode']}"
+    # 체결(fills) 데이터에는 posId/mgnMode가 없기 때문에, 포지션과 체결을 같은
+    # 키로 매칭할 수 있도록 일부러 posId를 쓰지 않고 instId+posSide만 사용한다.
+    return f"{p['instId']}|{p['posSide']}"
 
 
 def direction_label(p: dict) -> str:
@@ -189,15 +284,25 @@ def direction_label(p: dict) -> str:
     return "롱" if p["posSide"] == "long" else "숏"
 
 
-def fmt_num(x) -> str:
+def fmt_num(x, decimals: int = 2) -> str:
     x = float(x)
-    # 소수점 불필요한 0 제거
-    s = f"{x:.8f}".rstrip("0").rstrip(".")
+    # 소수점 불필요한 0 제거, 표시 자릿수는 기본 2자리까지만
+    s = f"{x:.{decimals}f}".rstrip("0").rstrip(".")
     return s if s else "0"
 
 
+def ticker(inst_id: str) -> str:
+    """'BTC-USDT-SWAP' -> 'btc' 처럼 짧은 표시용 심볼."""
+    return inst_id.split("-")[0].lower()
+
+
+def direction_word(p: dict) -> str:
+    """'long📈' / 'short📉' 표시용 문자열."""
+    return "long📈" if direction_label(p) == "롱" else "short📉"
+
+
 # ---------------------------------------------------------------------------
-# 이벤트 분류 & 메시지 포맷
+# 체결 -> 이벤트 분류
 # ---------------------------------------------------------------------------
 def build_snapshot_map(positions: list[dict]) -> dict:
     return {position_key(p): p for p in positions}
@@ -215,124 +320,165 @@ def find_close_record(inst_id: str) -> dict | None:
     return max(records, key=lambda r: int(r.get("uTime", "0")))
 
 
-def process_events(prev_positions: dict, curr_positions: dict) -> list[dict]:
-    """이벤트 목록을 반환한다. 각 이벤트는 dict(type=..., key=..., ...)."""
-    events = []
-    all_keys = set(prev_positions) | set(curr_positions)
+def _classify(old_mag: float, new_mag: float, direction: str, common: dict) -> list[dict]:
+    """포지션 크기(항상 0 이상)의 전/후 비교만으로 이벤트 하나를 만든다."""
+    if abs(new_mag - old_mag) < 1e-12:
+        return []
+    if old_mag == 0 and new_mag > 0:
+        return [{**common, "type": "entry", "direction": direction, "size_before": 0.0, "size_after": new_mag}]
+    if new_mag == 0 and old_mag > 0:
+        return [{**common, "type": "full_close", "direction": direction, "size_before": old_mag, "size_after": 0.0}]
+    if new_mag > old_mag:
+        return [{**common, "type": "add", "direction": direction, "size_before": old_mag, "size_after": new_mag}]
+    return [{**common, "type": "partial_close", "direction": direction, "size_before": old_mag, "size_after": new_mag}]
 
-    for key in all_keys:
-        prev = prev_positions.get(key)
-        curr = curr_positions.get(key)
 
-        if prev is None and curr is not None:
-            events.append({"type": "entry", "key": key, "curr": curr})
+def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict) -> list[dict]:
+    """체결들을 오래된 순서 그대로 재생하며 이벤트 목록을 만든다.
+    체결 하나하나를 다 처리하므로, 같은 폴링 구간 안에 여러 매매가 있어도
+    (심지어 서로 상쇄되어도) 전부 개별 이벤트로 남는다."""
+    # 원웨이(net) 모드는 부호 있는 값으로, 헤지 모드(long/short 버킷)는 0 이상 값으로 추적
+    ledger: dict[str, float] = {}
+    for key, p in prev_positions.items():
+        ledger[key] = float(p["pos"]) if p["posSide"] == "net" else abs(float(p["pos"]))
 
-        elif prev is not None and curr is None:
-            events.append({"type": "full_close", "key": key, "prev": prev})
+    events: list[dict] = []
 
-        elif prev is not None and curr is not None:
-            prev_sz = abs(float(prev["pos"]))
-            curr_sz = abs(float(curr["pos"]))
-            size_changed = abs(curr_sz - prev_sz) > 1e-12
-            lever_changed = str(prev.get("lever")) != str(curr.get("lever"))
+    for f in fills:
+        inst_id = f["instId"]
+        pos_side = f["posSide"]
+        side = f["side"]
+        fill_sz = float(f["fillSz"])
+        fill_px = float(f["fillPx"])
+        key = f"{inst_id}|{pos_side}"
+        old_signed = ledger.get(key, 0.0)
 
-            if not size_changed and not lever_changed:
-                continue  # 수량·레버리지 모두 변화 없음 (마크가격만 갱신된 경우 등) - 이벤트 아님
+        if pos_side == "short":
+            delta = fill_sz if side == "sell" else -fill_sz
+        else:  # long 또는 net: 매수가 증가 방향
+            delta = fill_sz if side == "buy" else -fill_sz
 
-            if not size_changed and lever_changed:
-                # 수량은 그대로인데 레버리지만 바뀐 경우 (도중에 배율 조정)
-                events.append({"type": "leverage_change", "key": key, "prev": prev, "curr": curr})
-            elif curr_sz > prev_sz:
-                events.append({"type": "add", "key": key, "prev": prev, "curr": curr, "lever_changed": lever_changed})
+        new_signed = old_signed + delta
+        if pos_side in ("long", "short"):
+            new_signed = max(new_signed, 0.0)  # 버킷 내에서는 0 미만으로 내려갈 수 없음
+
+        ctx = curr_positions.get(key) or prev_positions.get(key) or {}
+        common = {
+            "instId": inst_id,
+            "key": key,
+            "fill_px": fill_px,
+            "lever": ctx.get("lever"),
+            "entry_px": float(ctx["avgPx"]) if ctx.get("avgPx") else None,
+        }
+
+        if pos_side in ("long", "short"):
+            direction = "롱" if pos_side == "long" else "숏"
+            events.extend(_classify(old_signed, new_signed, direction, common))
+        else:
+            if old_signed != 0 and new_signed != 0 and (old_signed > 0) != (new_signed > 0):
+                # 한 체결 안에서 방향이 뒤집힌 경우 (반대매매 초과 주문) - 전체청산 + 신규진입으로 분리
+                old_dir = "롱" if old_signed > 0 else "숏"
+                new_dir = "롱" if new_signed > 0 else "숏"
+                events.append({**common, "type": "full_close", "direction": old_dir,
+                               "size_before": abs(old_signed), "size_after": 0.0})
+                events.append({**common, "type": "entry", "direction": new_dir,
+                               "size_before": 0.0, "size_after": abs(new_signed)})
             else:
-                events.append({"type": "partial_close", "key": key, "prev": prev, "curr": curr, "lever_changed": lever_changed})
+                ref = new_signed if new_signed != 0 else old_signed
+                direction = "롱" if ref > 0 else "숏"
+                events.extend(_classify(abs(old_signed), abs(new_signed), direction, common))
+
+        ledger[key] = new_signed
 
     return events
 
 
-def format_entry(p: dict) -> str:
-    direction = direction_label(p)
-    sz = fmt_num(p["pos"])
-    return (
-        f"🟢 <b>[신규 진입]</b>\n"
-        f"{p['instId']}\n"
-        f"방향: {direction}  |  레버리지: {p['lever']}배\n"
-        f"진입가: {p['avgPx']}\n"
-        f"수량: {sz}"
-    )
+def detect_leverage_changes(prev_positions: dict, curr_positions: dict) -> list[dict]:
+    """수량 변화 없이 레버리지만 바뀐 경우. 레버리지 변경은 체결 기록에 남지 않으므로
+    스냅샷 비교로만 잡아낼 수 있다."""
+    events = []
+    for key, curr in curr_positions.items():
+        prev = prev_positions.get(key)
+        if prev and str(prev.get("lever")) != str(curr.get("lever")):
+            events.append({"type": "leverage_change", "key": key, "prev": prev, "curr": curr})
+    return events
 
 
-def format_add(prev: dict, curr: dict) -> str:
-    direction = direction_label(curr)
-    prev_sz = abs(float(prev["pos"]))
-    curr_sz = abs(float(curr["pos"]))
-    add_sz = curr_sz - prev_sz
-    add_pct = add_sz / prev_sz * 100 if prev_sz else 0
-    return (
-        f"🔵 <b>[추가매수]</b>\n"
-        f"{curr['instId']}\n"
-        f"방향: {direction}  |  레버리지: {curr['lever']}배\n"
-        f"추가 수량: {fmt_num(add_sz)}  (기존 대비 +{add_pct:.1f}%)\n"
-        f"갱신된 평단가: {curr['avgPx']}\n"
-        f"현재 총 수량: {fmt_num(curr_sz)}"
-    )
+# ---------------------------------------------------------------------------
+# 메시지 포맷
+# ---------------------------------------------------------------------------
+def format_fill_event(ev: dict) -> str:
+    inst_id = ev["instId"]
+    direction = ev["direction"]
+    lever = ev.get("lever") or "?"
 
-
-def format_partial_close(prev: dict, curr: dict) -> str:
-    direction = direction_label(curr)
-    prev_sz = abs(float(prev["pos"]))
-    curr_sz = abs(float(curr["pos"]))
-    closed_sz = prev_sz - curr_sz
-    closed_pct = closed_sz / prev_sz * 100 if prev_sz else 0
-
-    # 정확한 체결가 대신, 감지 시점의 mark price와 평단가를 비교한 근사치로 익절/손절을 라벨링한다.
-    # (체결 단위 정밀도가 필요하면 trade/fills-history 연동으로 확장 가능 - 하단 "알려진 한계" 참고)
-    mark_px = float(curr.get("markPx", curr["avgPx"]))
-    entry_px = float(curr["avgPx"])
-    is_profit = (mark_px >= entry_px) if direction == "롱" else (mark_px <= entry_px)
-    label = "부분익절" if is_profit else "부분손절"
-
-    return (
-        f"🟡 <b>[{label}]</b>\n"
-        f"{curr['instId']}\n"
-        f"방향: {direction}  |  레버리지: {curr['lever']}배\n"
-        f"청산 수량: {fmt_num(closed_sz)}  (보유 물량의 {closed_pct:.1f}%)\n"
-        f"청산 시점 참고가: {curr.get('markPx', 'N/A')}\n"
-        f"잔여 수량: {fmt_num(curr_sz)}\n"
-        f"※ 정확한 체결가·실현손익은 계좌 체결내역에서 확인하세요"
-    )
-
-
-def format_full_close(prev: dict) -> str:
-    direction = direction_label(prev)
-    record = find_close_record(prev["instId"])
-
-    if record:
-        pnl_ratio = float(record.get("pnlRatio", 0)) * 100
-        pnl = record.get("pnl", "N/A")
-        open_px = record.get("openAvgPx", prev.get("avgPx", "N/A"))
-        close_px = record.get("closeAvgPx", "N/A")
-        hold_ms = int(record.get("uTime", 0)) - int(record.get("cTime", 0))
-        hold_h = hold_ms / 1000 / 3600 if hold_ms > 0 else None
-        hold_line = f"보유 시간: 약 {hold_h:.1f}시간\n" if hold_h else ""
-        result_emoji = "✅" if float(record.get("pnl", 0)) >= 0 else "❌"
+    if ev["type"] == "entry":
         return (
-            f"🔴 <b>[전체청산]</b> {result_emoji}\n"
-            f"{prev['instId']}\n"
-            f"방향: {direction}  |  레버리지: {record.get('lever', prev.get('lever'))}배\n"
-            f"진입가: {open_px}  →  청산가: {close_px}\n"
-            f"{hold_line}"
-            f"실현손익: {pnl}  ({pnl_ratio:+.2f}%)"
+            f"🟢 <b>[신규 진입]</b>\n"
+            f"{inst_id}\n"
+            f"방향: {direction}  |  레버리지: {lever}배\n"
+            f"체결가: {fmt_num(ev['fill_px'])}\n"
+            f"{qty_line(inst_id, ev['size_after'])}"
         )
 
-    # positions-history에 아직 반영 안 된 경우의 폴백 (다음 실행에서는 조회 가능해짐)
-    return (
-        f"🔴 <b>[전체청산]</b>\n"
-        f"{prev['instId']}\n"
-        f"방향: {direction}  |  레버리지: {prev['lever']}배\n"
-        f"진입가: {prev['avgPx']}\n"
-        f"※ 실현손익 정산 데이터 반영 대기 중 (다음 갱신에서 계좌 정산 내역 직접 확인 권장)"
-    )
+    if ev["type"] == "add":
+        added = ev["size_after"] - ev["size_before"]
+        add_pct = added / ev["size_before"] * 100 if ev["size_before"] else 0
+        return (
+            f"🔵 <b>[추가매수]</b>\n"
+            f"{inst_id}\n"
+            f"방향: {direction}  |  레버리지: {lever}배\n"
+            f"체결가: {fmt_num(ev['fill_px'])}\n"
+            f"{qty_line(inst_id, added, label='추가 수량')}  (기존 대비 +{add_pct:.1f}%)\n"
+            f"{qty_line(inst_id, ev['size_after'], label='현재 총 수량')}"
+        )
+
+    if ev["type"] == "partial_close":
+        closed = ev["size_before"] - ev["size_after"]
+        closed_pct = closed / ev["size_before"] * 100 if ev["size_before"] else 0
+        entry_px = ev.get("entry_px")
+        label = "부분청산"
+        if entry_px:
+            is_profit = (ev["fill_px"] >= entry_px) if direction == "롱" else (ev["fill_px"] <= entry_px)
+            label = "부분익절" if is_profit else "부분손절"
+        return (
+            f"🟡 <b>[{label}]</b>\n"
+            f"{inst_id}\n"
+            f"방향: {direction}  |  레버리지: {lever}배\n"
+            f"{qty_line(inst_id, closed, label='청산 수량')}  (보유 물량의 {closed_pct:.1f}%)\n"
+            f"체결가: {fmt_num(ev['fill_px'])}\n"
+            f"{qty_line(inst_id, ev['size_after'], label='잔여 수량')}"
+        )
+
+    if ev["type"] == "full_close":
+        record = find_close_record(inst_id)
+        if record:
+            pnl_ratio = float(record.get("pnlRatio", 0)) * 100
+            pnl = fmt_num(record.get("pnl", 0))
+            open_px = fmt_num(record.get("openAvgPx", ev.get("entry_px") or 0))
+            close_px = fmt_num(record.get("closeAvgPx", ev["fill_px"]))
+            hold_ms = int(record.get("uTime", 0)) - int(record.get("cTime", 0))
+            hold_h = hold_ms / 1000 / 3600 if hold_ms > 0 else None
+            hold_line = f"보유 시간: 약 {hold_h:.1f}시간\n" if hold_h else ""
+            result_emoji = "✅" if float(record.get("pnl", 0)) >= 0 else "❌"
+            return (
+                f"🔴 <b>[전체청산]</b> {result_emoji}\n"
+                f"{inst_id}\n"
+                f"방향: {direction}  |  레버리지: {record.get('lever', lever)}배\n"
+                f"진입가: {open_px}  →  청산가: {close_px}\n"
+                f"{hold_line}"
+                f"실현손익: {pnl}  ({pnl_ratio:+.2f}%)"
+            )
+        # positions-history에 아직 반영 안 된 경우의 폴백 (다음 실행에서는 조회 가능해짐)
+        return (
+            f"🔴 <b>[전체청산]</b>\n"
+            f"{inst_id}\n"
+            f"방향: {direction}  |  레버리지: {lever}배\n"
+            f"체결가: {fmt_num(ev['fill_px'])}\n"
+            f"※ 실현손익 정산 데이터 반영 대기 중 (다음 갱신에서 계좌 정산 내역 직접 확인 권장)"
+        )
+
+    return ""
 
 
 def format_leverage_change(prev: dict, curr: dict) -> str:
@@ -342,22 +488,20 @@ def format_leverage_change(prev: dict, curr: dict) -> str:
         f"{curr['instId']}\n"
         f"방향: {direction}\n"
         f"레버리지: {prev.get('lever')}배 → {curr.get('lever')}배\n"
-        f"수량: {fmt_num(curr['pos'])}  |  평단가: {curr['avgPx']}"
+        f"{qty_line(curr['instId'], curr['pos'])}  |  평단가: {fmt_num(curr['avgPx'])}"
     )
 
 
 def format_summary(curr_positions: dict) -> str:
     if not curr_positions:
-        return "📋 <b>[현재 보유 포지션]</b>\n보유 중인 포지션 없음"
-    lines = ["📋 <b>[현재 보유 포지션]</b>"]
+        return "🔈<b>진행중인 포지션</b>\n\n보유 중인 포지션 없음"
+    lines = ["🔈<b>진행중인 포지션</b>", ""]
     for p in curr_positions.values():
-        direction = direction_label(p)
-        upl_ratio = float(p.get("uplRatio", 0) or 0) * 100
         lines.append(
-            f"\n{p['instId']}  ({direction} {p['lever']}배)\n"
-            f"수량: {fmt_num(p['pos'])}  |  평단가: {p['avgPx']}  |  평가손익: {upl_ratio:+.2f}%"
+            f"{ticker(p['instId'])} {direction_word(p)} / {p['lever']}배 / 평단 : {fmt_num(p['avgPx'])}"
         )
-    lines.append(f"\n<i>갱신: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</i>")
+    lines.append("")
+    lines.append(f"<i>갱신: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</i>")
     return "\n".join(lines)
 
 
@@ -368,14 +512,17 @@ def main():
     state = load_state()
     prev_positions = state.get("positions", {})
     thread_ids = state.get("thread_root_message_id", {})  # key -> 포지션 스레드의 첫 메시지 id
+    last_bill_id = state.get("last_bill_id")
 
     curr_positions_list = get_positions()
     curr_positions = build_snapshot_map(curr_positions_list)
 
-    # 최초 실행: 이미 보유 중인 포지션을 "신규 진입"으로 오인하지 않도록 베이스라인만 저장
+    # 최초 실행: 이미 보유 중인 포지션을 "신규 진입"으로 오인하지 않도록 베이스라인만 저장하고,
+    # 이후 체결을 빠짐없이 조회하기 위한 체크포인트(가장 최근 체결의 billId)를 확보한다.
     if not state.get("initialized"):
         state["positions"] = curr_positions
         state["initialized"] = True
+        state["last_bill_id"] = get_latest_bill_id()
         summary_id = tg_send(format_summary(curr_positions))
         tg_pin(summary_id)
         state["summary_message_id"] = summary_id
@@ -384,40 +531,24 @@ def main():
         print("최초 실행: 베이스라인 저장 및 요약 메시지 고정 완료")
         return
 
-    events = process_events(prev_positions, curr_positions)
+    fills = get_new_fills(last_bill_id)
+    fill_events = process_fills(fills, prev_positions, curr_positions)
+    lever_events = detect_leverage_changes(prev_positions, curr_positions)
 
-    for ev in events:
+    for ev in fill_events:
         key = ev["key"]
-        reply_to = thread_ids.get(key)
-
         if ev["type"] == "entry":
-            msg = format_entry(ev["curr"])
-            msg_id = tg_send(msg)
-            thread_ids[key] = msg_id  # 이후 이 포지션의 후속 이벤트는 여기에 reply로 연결
-
-        elif ev["type"] == "add":
-            msg = format_add(ev["prev"], ev["curr"])
-            if ev.get("lever_changed"):
-                msg += f"\n⚙️ 레버리지 변경: {ev['prev'].get('lever')}배 → {ev['curr'].get('lever')}배"
-            tg_send(msg, reply_to=reply_to)
-
-        elif ev["type"] == "partial_close":
-            msg = format_partial_close(ev["prev"], ev["curr"])
-            if ev.get("lever_changed"):
-                msg += f"\n⚙️ 레버리지 변경: {ev['prev'].get('lever')}배 → {ev['curr'].get('lever')}배"
-            tg_send(msg, reply_to=reply_to)
-
-        elif ev["type"] == "leverage_change":
-            # 수량 변화 없이 레버리지만 조정한 경우 (도중에 배율만 올리거나 내린 경우)
-            msg = format_leverage_change(ev["prev"], ev["curr"])
-            tg_send(msg, reply_to=reply_to)
-
-        elif ev["type"] == "full_close":
-            msg = format_full_close(ev["prev"])
-            tg_send(msg, reply_to=reply_to)
-            thread_ids.pop(key, None)  # 스레드 종료
-
+            msg_id = tg_send(format_fill_event(ev))  # 신규 진입은 항상 새 스레드로 시작
+            thread_ids[key] = msg_id
+        else:
+            tg_send(format_fill_event(ev), reply_to=thread_ids.get(key))
+            if ev["type"] == "full_close":
+                thread_ids.pop(key, None)
         time.sleep(0.5)  # 텔레그램 rate limit 여유
+
+    for ev in lever_events:
+        tg_send(format_leverage_change(ev["prev"], ev["curr"]), reply_to=thread_ids.get(ev["key"]))
+        time.sleep(0.5)
 
     # 상단 고정 요약 메시지는 이벤트 유무와 무관하게 항상 최신 상태로 갱신
     summary_id = state.get("summary_message_id")
@@ -433,11 +564,13 @@ def main():
         summary_id = tg_send(summary_text)
         tg_pin(summary_id)
 
+    if fills:
+        state["last_bill_id"] = fills[-1]["billId"]
     state["positions"] = curr_positions
     state["summary_message_id"] = summary_id
     state["thread_root_message_id"] = thread_ids
     save_state(state)
-    print(f"실행 완료: 이벤트 {len(events)}건 처리")
+    print(f"실행 완료: 체결 {len(fills)}건 -> 이벤트 {len(fill_events) + len(lever_events)}건 처리")
 
 
 if __name__ == "__main__":
@@ -447,12 +580,13 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 # 알려진 한계 (필요 시 직접 보완)
 # ---------------------------------------------------------------------------
-# 1. 방향 전환 미검출: 헤지 모드가 아닌 원웨이(net) 모드에서, 보유 수량보다 큰 반대
-#    방향 주문으로 포지션이 롱->숏(혹은 그 반대)으로 즉시 뒤집히는 경우, 현재 로직은
-#    이를 "전체청산 후 신규진입"으로 자연스럽게 처리하지만 두 이벤트가 별도 스레드로
-#    잡힌다 (의도된 동작이지만, 하나로 묶고 싶다면 posId 변경 여부로 추가 판별 필요).
-# 2. 부분청산의 정확한 체결가/실현손익: 현재는 감지 시점의 mark price로 익절/손절
-#    여부만 근사 판정한다. 체결 단위의 정확한 가격이 필요하면 /api/v5/trade/fills-history
-#    를 폴링 주기마다 조회해 reduce 방향 체결만 필터링하는 로직을 추가하면 된다.
-# 3. 폴링 간격보다 짧은 시간 안에 여러 이벤트(예: 추가매수 후 바로 부분청산)가 발생하면
-#    두 변화가 하나의 순수 증감으로 뭉뚱그려 보일 수 있다. 간격을 좁히면 완화된다.
+# 1. before 파라미터 방향 가정: OKX v5의 일반적인 페이지네이션 관례상 `before=<billId>`는
+#    그 billId보다 "새로운"(더 큰) 기록을 요청하는 파라미터라고 가정하고 구현했다.
+#    실제로 처음 실행해보고 이벤트가 중복되거나 전혀 안 잡히면 이 가정이 틀린 것이니 알려달라.
+# 2. 청산/ADL 등 특수 체결: 강제청산(liquidation)이나 자동감산(ADL)으로 발생한 체결도
+#    일반 체결과 동일하게 처리한다 (오히려 이런 경우일수록 놓치면 안 되는 이벤트라 의도된 동작).
+# 3. 레버리지 변경은 체결 기록에 남지 않아 여전히 "5분 간격 스냅샷 비교"로만 감지된다
+#    (수량 변화와 동시에 일어난 경우가 아니라 순수 레버리지 조정만 있었던 경우).
+# 4. 체크포인트(last_bill_id) 유실: state.json이 어떤 이유로든 소실되면 그 이전 체결들은
+#    다시 조회되지 않는다. GitHub Actions가 매번 state.json을 커밋하므로 일반적인 상황에서는
+#    문제 없지만, 저장소를 통째로 밀어버리는 등의 사고에는 대비가 안 되어 있다.
