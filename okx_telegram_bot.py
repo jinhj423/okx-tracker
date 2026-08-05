@@ -292,13 +292,13 @@ def fmt_num(x, decimals: int = 2) -> str:
 
 
 def ticker(inst_id: str) -> str:
-    """'BTC-USDT-SWAP' -> 'btc' 처럼 짧은 표시용 심볼."""
-    return inst_id.split("-")[0].lower()
+    """'BTC-USDT-SWAP' -> 'BTC' 처럼 짧은 표시용 심볼."""
+    return inst_id.split("-")[0].upper()
 
 
 def direction_word(p: dict) -> str:
-    """'long📈' / 'short📉' 표시용 문자열."""
-    return "long📈" if direction_label(p) == "롱" else "short📉"
+    """'LONG' / 'SHORT' 표시용 문자열."""
+    return "LONG" if direction_label(p) == "롱" else "SHORT"
 
 
 # ---------------------------------------------------------------------------
@@ -494,13 +494,22 @@ def format_leverage_change(prev: dict, curr: dict) -> str:
 
 def format_summary(curr_positions: dict) -> str:
     if not curr_positions:
-        return "🔈<b>진행중인 포지션</b>\n\n보유 중인 포지션 없음"
-    lines = ["🔈<b>진행중인 포지션</b>", ""]
+        return "🔈 <b>진행중인 포지션</b>\n\n보유 중인 포지션 없음"
+
+    rows = []
     for p in curr_positions.values():
-        lines.append(
-            f"{ticker(p['instId'])} {direction_word(p)} / {p['lever']}배 / 평단 : {fmt_num(p['avgPx'])}"
-        )
-    lines.append("")
+        emoji = "📈" if direction_label(p) == "롱" else "📉"
+        rows.append((emoji, ticker(p["instId"]), direction_word(p), f"{p['lever']}x", fmt_num(p["avgPx"])))
+
+    # 종목마다 글자 수가 달라서, 열 너비를 데이터에 맞춰 자동으로 맞춘다 (표처럼 정렬됨)
+    tick_w = max(len(r[1]) for r in rows) + 1
+    dir_w = max(len(r[2]) for r in rows) + 1
+    lev_w = max(len(r[3]) for r in rows) + 1
+
+    lines = ["🔈 <b>진행중인 포지션</b>", "", "<pre>"]
+    for emoji, tk, dw, lv, px in rows:
+        lines.append(f"{emoji} {tk.ljust(tick_w)}{dw.ljust(dir_w)}{lv.ljust(lev_w)}{px.rjust(9)}")
+    lines.append("</pre>")
     lines.append(f"<i>갱신: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</i>")
     return "\n".join(lines)
 
