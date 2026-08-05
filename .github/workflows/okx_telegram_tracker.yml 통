@@ -1,0 +1,49 @@
+name: OKX Position Tracker
+
+on:
+  schedule:
+    # 5분 간격. GitHub의 스케줄 트리거는 부하 상황에 따라 몇 분 지연될 수 있음(정확도 우선이라 무방).
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}  # 필요할 때 수동 실행용
+
+# 이전 실행이 아직 끝나지 않았으면 새 실행을 큐에 대기시켜 state.json 동시 수정 충돌을 방지
+concurrency:
+  group: okx-position-tracker
+  cancel-in-progress: false
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 파이썬 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 의존성 설치
+        run: pip install requests
+
+      - name: 포지션 확인 및 텔레그램 전송
+        env:
+          OKX_API_KEY: ${{ secrets.OKX_API_KEY }}
+          OKX_API_SECRET: ${{ secrets.OKX_API_SECRET }}
+          OKX_API_PASSPHRASE: ${{ secrets.OKX_API_PASSPHRASE }}
+          OKX_SIMULATED: ${{ vars.OKX_SIMULATED || '0' }}
+          OKX_INST_TYPES: ${{ vars.OKX_INST_TYPES || 'SWAP' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_TOPIC_ID: ${{ secrets.TELEGRAM_TOPIC_ID }}
+        run: python okx_telegram_bot.py
+
+      - name: 변경된 상태 파일 커밋
+        run: |
+          git config user.name "okx-tracker-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || git commit -m "chore: update position state"
+          git push
