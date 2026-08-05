@@ -128,15 +128,26 @@ def get_fills_history(inst_type: str, before: str | None = None, limit: int = 10
 
 def get_new_fills(last_bill_id: str | None) -> list[dict]:
     """직전 체크포인트 이후 발생한 모든 체결을, 오래된 순서로 정렬해 반환한다.
-    체크포인트가 없으면(비정상 상황) 과거 이력을 소급 처리하지 않기 위해 빈 리스트를 반환."""
+    체크포인트가 없으면(비정상 상황) 과거 이력을 소급 처리하지 않기 위해 빈 리스트를 반환.
+
+    OKX의 `before` 파라미터가 정확히 어느 방향을 반환하는지 100% 확신할 수 없어서
+    (문서상 관례로는 "이 billId보다 새로운 것"이지만, 실제 이 파라미터에 의존하다가
+    아무것도 안 잡히는 문제가 있었다) - 아예 그 파라미터 없이 최근 체결 목록을
+    통째로 가져온 뒤, billId를 직접 숫자로 비교해서 새 것만 걸러낸다. 이러면
+    페이지네이션 파라미터의 방향에 의존하지 않아도 된다."""
     if not last_bill_id:
         return []
+    last_bid = int(last_bill_id)
     all_fills = []
     for inst_type in INST_TYPES:
         try:
-            all_fills.extend(get_fills_history(inst_type, before=last_bill_id, limit=100))
+            fills = get_fills_history(inst_type, limit=100)  # before 없이 최신순 그대로
         except Exception as e:
             print(f"체결 내역 조회 실패 ({inst_type}): {e}")
+            fills = []
+        new_ones = [f for f in fills if int(f["billId"]) > last_bid]
+        print(f"[fills] {inst_type}: 조회 {len(fills)}건 중 신규 {len(new_ones)}건 (체크포인트={last_bid})")
+        all_fills.extend(new_ones)
     all_fills.sort(key=lambda f: int(f["billId"]))
     return all_fills
 
@@ -530,6 +541,7 @@ def main():
     prev_positions = state.get("positions", {})
     thread_ids = state.get("thread_root_message_id", {})  # key -> 포지션 스레드의 첫 메시지 id
     last_bill_id = state.get("last_bill_id")
+    print(f"[state] initialized={state.get('initialized')}, last_bill_id={last_bill_id}, 저장된 포지션 수={len(prev_positions)}")
 
     curr_positions_list = get_positions()
     curr_positions = build_snapshot_map(curr_positions_list)
@@ -540,6 +552,7 @@ def main():
         state["positions"] = curr_positions
         state["initialized"] = True
         state["last_bill_id"] = get_latest_bill_id()
+        print(f"[init] 확보한 체크포인트 last_bill_id={state['last_bill_id']}")
         summary_id = tg_send(format_summary(curr_positions))
         tg_pin(summary_id)
         state["summary_message_id"] = summary_id
