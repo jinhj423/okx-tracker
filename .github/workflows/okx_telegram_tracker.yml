@@ -2,11 +2,11 @@ name: OKX Position Tracker
 
 on:
   schedule:
-    # 1분 간격. Public 저장소라 Actions 무료라 한도 걱정은 없음.
+    # 3분 간격. Public 저장소라 Actions 무료라 한도 걱정은 없음.
     # (참고: GitHub 자체 스케줄러는 정시 보장이 안 되므로, 실제 트리거는 cron-job.org가
-    #  workflow_dispatch를 1분마다 호출하는 쪽이 메인이고 이건 백업 성격)
-    - cron: "* * * * *"
-  workflow_dispatch: {}  # cron-job.org가 1분마다 이걸 호출함 + 수동 실행용
+    #  workflow_dispatch를 3분마다 호출하는 쪽이 메인이고 이건 백업 성격)
+    - cron: "*/3 * * * *"
+  workflow_dispatch: {}  # cron-job.org가 3분마다 이걸 호출함 + 수동 실행용
 
 # 이전 실행이 아직 끝나지 않았으면 새 실행을 큐에 대기시켜 state.json 동시 수정 충돌을 방지
 concurrency:
