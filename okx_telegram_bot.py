@@ -168,6 +168,59 @@ def get_latest_bill_id() -> str | None:
     return latest
 
 
+FILL_MERGE_WINDOW_SECONDS = 60  # 이 시간 안에 연달아 체결되면 하나로 합친다
+
+
+def merge_fills(fills: list[dict], window_seconds: int = FILL_MERGE_WINDOW_SECONDS) -> list[dict]:
+    """짧은 시간 안에 같은 종목·같은 방향(posSide)·같은 매매(side)로 연달아 체결된 것들을
+    하나로 합친다. 큰 주문 하나가 거래소에서 여러 체결로 쪼개져 잡히면서
+    "한 번에 진입/청산했는데 여러 건으로 나뉘어 보이는" 문제를 막기 위함.
+    합쳐진 체결가는 수량 가중평균, billId는 그룹의 마지막 체결 것을 쓴다
+    (체크포인트가 묶인 원본 체결 전부를 지나가도록)."""
+    if not fills:
+        return []
+    merged: list[dict] = []
+    group: dict | None = None
+
+    def flush():
+        if group is None:
+            return
+        sz = group["_sz"]
+        merged.append({
+            "instId": group["instId"],
+            "posSide": group["posSide"],
+            "side": group["side"],
+            "fillSz": str(sz),
+            "fillPx": str(group["_notional"] / sz) if sz else "0",
+            "billId": group["billId"],
+            "ts": group["ts"],
+        })
+
+    for f in fills:
+        key = (f["instId"], f["posSide"], f["side"])
+        ts = int(f["ts"])
+        sz = float(f["fillSz"])
+        px = float(f["fillPx"])
+        if group is not None and group["_key"] == key and (ts - group["_last_ts"]) <= window_seconds * 1000:
+            group["_sz"] += sz
+            group["_notional"] += sz * px
+            group["_last_ts"] = ts
+            group["billId"] = f["billId"]  # 마지막 체결의 billId로 갱신
+            group["ts"] = f["ts"]
+        else:
+            flush()
+            group = {
+                "_key": key, "_sz": sz, "_notional": sz * px, "_last_ts": ts,
+                "instId": f["instId"], "posSide": f["posSide"], "side": f["side"],
+                "billId": f["billId"], "ts": f["ts"],
+            }
+    flush()
+
+    if len(merged) != len(fills):
+        print(f"[merge] 체결 {len(fills)}건 -> {window_seconds}초 이내 연속 체결 병합 후 {len(merged)}건")
+    return merged
+
+
 # ---------------------------------------------------------------------------
 # 계약 수 -> 실제 수량 환산
 # ---------------------------------------------------------------------------
@@ -612,6 +665,7 @@ def main():
     # last_bill_id가 비어있어도(초기화 당시 조회 실패 등) get_new_fills가 0으로 간주해
     # 최근 체결을 전부 "새 것"으로 처리하므로, 별도 분기 없이 그대로 호출하면 된다.
     fills = get_new_fills(last_bill_id)
+    fills = merge_fills(fills)  # 1분 이내 연속 체결은 하나로 합쳐서 이벤트를 만든다
     fill_groups = process_fills(fills, prev_positions, curr_positions)
     lever_events = detect_leverage_changes(prev_positions, curr_positions)
     total_events = 0
