@@ -128,8 +128,10 @@ def get_fills_history(inst_type: str, before: str | None = None, limit: int = 10
 
 def get_new_fills(last_bill_id: str | None) -> list[dict]:
     """직전 체크포인트 이후 발생한 모든 체결을, 오래된 순서로 정렬해 반환한다.
-    체크포인트가 없으면(비정상 복구 상황) 0으로 간주해 최근 체결(최대 100건)을 전부
-    '새 것'으로 취급한다 - 트레이드를 조용히 누락시키는 것보다는 낫다는 판단.
+    체크포인트가 없으면(비정상 복구 상황) 0으로 간주해 최근 체결을 전부 '새 것'으로
+    취급하되, 한 번에 텔레그램으로 쏟아붓다 레이트리밋에 걸리는 걸 막기 위해
+    조회량 자체를 30건으로 제한한다 (평상시 5분 간격 폴링에서는 이보다 훨씬 적게
+    쌓이므로 정상 운영에는 지장 없다).
 
     OKX의 `before` 파라미터가 정확히 어느 방향을 반환하는지 100% 확신할 수 없어서
     (문서상 관례로는 "이 billId보다 새로운 것"이지만, 실제 이 파라미터에 의존하다가
@@ -140,7 +142,7 @@ def get_new_fills(last_bill_id: str | None) -> list[dict]:
     all_fills = []
     for inst_type in INST_TYPES:
         try:
-            fills = get_fills_history(inst_type, limit=100)  # before 없이 최신순 그대로
+            fills = get_fills_history(inst_type, limit=30)  # before 없이 최신순 그대로
         except Exception as e:
             print(f"체결 내역 조회 실패 ({inst_type}): {e}")
             fills = []
@@ -221,15 +223,28 @@ def qty_line(inst_id: str, contracts, label: str = "수량") -> str:
 # 텔레그램 API
 # ---------------------------------------------------------------------------
 TG_BASE = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+TELEGRAM_SEND_DELAY = 1.2  # 메시지 사이 기본 대기시간(초) - 레이트리밋 예방
 
 
-def tg_call(method: str, payload: dict) -> dict:
-    resp = requests.post(f"{TG_BASE}/{method}", json=payload, timeout=15)
-    resp.raise_for_status()
-    data = resp.json()
-    if not data.get("ok"):
-        raise RuntimeError(f"텔레그램 API 오류: {data}")
-    return data["result"]
+def tg_call(method: str, payload: dict, max_retries: int = 5) -> dict:
+    """텔레그램 API 호출. 429(rate limit)를 받으면 크래시시키는 대신
+    텔레그램이 알려주는 시간만큼 기다렸다가 자동으로 재시도한다."""
+    for attempt in range(max_retries):
+        resp = requests.post(f"{TG_BASE}/{method}", json=payload, timeout=15)
+        if resp.status_code == 429:
+            try:
+                retry_after = int(resp.json().get("parameters", {}).get("retry_after", 5))
+            except Exception:
+                retry_after = 5
+            print(f"[telegram] 429 rate limit - {retry_after}초 대기 후 재시도 ({attempt + 1}/{max_retries})")
+            time.sleep(retry_after + 1)
+            continue
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("ok"):
+            raise RuntimeError(f"텔레그램 API 오류: {data}")
+        return data["result"]
+    raise RuntimeError(f"텔레그램 API 반복 실패(429 rate limit 지속): {method}")
 
 
 def tg_send(text: str, reply_to: int | None = None) -> int:
@@ -371,8 +386,10 @@ def _classify(old_mag: float, new_mag: float, direction: str, common: dict) -> l
     return [{**common, "type": "partial_close", "direction": direction, "size_before": old_mag, "size_after": new_mag}]
 
 
-def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict) -> list[dict]:
-    """체결들을 오래된 순서 그대로 재생하며 이벤트 목록을 만든다.
+def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict) -> list[tuple[str, list[dict]]]:
+    """체결들을 오래된 순서 그대로 재생하며, 체결 하나당 (billId, 이벤트목록) 튜플을 만든다.
+    체결 단위로 묶어서 반환하는 이유는, 텔레그램 전송 도중 실패하더라도 "이 체결까지는
+    확실히 처리됨"을 체결 단위로 체크포인트에 반영할 수 있게 하기 위해서다.
     체결 하나하나를 다 처리하므로, 같은 폴링 구간 안에 여러 매매가 있어도
     (심지어 서로 상쇄되어도) 전부 개별 이벤트로 남는다."""
     # 원웨이(net) 모드는 부호 있는 값으로, 헤지 모드(long/short 버킷)는 0 이상 값으로 추적
@@ -380,7 +397,7 @@ def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict)
     for key, p in prev_positions.items():
         ledger[key] = float(p["pos"]) if p["posSide"] == "net" else abs(float(p["pos"]))
 
-    events: list[dict] = []
+    groups: list[tuple[str, list[dict]]] = []
 
     for f in fills:
         inst_id = f["instId"]
@@ -409,6 +426,7 @@ def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict)
             "entry_px": float(ctx["avgPx"]) if ctx.get("avgPx") else None,
         }
 
+        events: list[dict] = []
         if pos_side in ("long", "short"):
             direction = "롱" if pos_side == "long" else "숏"
             events.extend(_classify(old_signed, new_signed, direction, common))
@@ -427,8 +445,9 @@ def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict)
                 events.extend(_classify(abs(old_signed), abs(new_signed), direction, common))
 
         ledger[key] = new_signed
+        groups.append((f["billId"], events))
 
-    return events
+    return groups
 
 
 def detect_leverage_changes(prev_positions: dict, curr_positions: dict) -> list[dict]:
@@ -584,35 +603,42 @@ def main():
     # last_bill_id가 비어있어도(초기화 당시 조회 실패 등) get_new_fills가 0으로 간주해
     # 최근 체결을 전부 "새 것"으로 처리하므로, 별도 분기 없이 그대로 호출하면 된다.
     fills = get_new_fills(last_bill_id)
-    fill_events = process_fills(fills, prev_positions, curr_positions)
+    fill_groups = process_fills(fills, prev_positions, curr_positions)
     lever_events = detect_leverage_changes(prev_positions, curr_positions)
+    total_events = 0
 
-    for ev in fill_events:
-        key = ev["key"]
-        if ev["type"] == "entry":
-            msg_id = tg_send(format_fill_event(ev))  # 신규 진입은 항상 새 스레드로 시작
-            thread_ids[key] = msg_id
-        else:
-            tg_send(format_fill_event(ev), reply_to=thread_ids.get(key))
-            if ev["type"] == "full_close":
-                thread_ids.pop(key, None)
-        time.sleep(0.5)  # 텔레그램 rate limit 여유
+    # 체결 단위로 처리 + 저장을 묶는다: 텔레그램 전송 도중 실패해도, 그때까지 확실히
+    # 보낸 체결까지는 체크포인트가 전진해있어서 다음 실행이 처음부터 다시 쏟아붓지 않는다.
+    for bill_id, events in fill_groups:
+        for ev in events:
+            key = ev["key"]
+            if ev["type"] == "entry":
+                msg_id = tg_send(format_fill_event(ev))  # 신규 진입은 항상 새 스레드로 시작
+                thread_ids[key] = msg_id
+            else:
+                tg_send(format_fill_event(ev), reply_to=thread_ids.get(key))
+                if ev["type"] == "full_close":
+                    thread_ids.pop(key, None)
+            total_events += 1
+            time.sleep(TELEGRAM_SEND_DELAY)
+        # 이 체결(및 여기서 파생된 이벤트 전부)까지는 처리 완료 - 체크포인트 전진 후 즉시 저장
+        state["last_bill_id"] = bill_id
+        state["thread_root_message_id"] = thread_ids
+        save_state(state)
 
     for ev in lever_events:
         tg_send(format_leverage_change(ev["prev"], ev["curr"]), reply_to=thread_ids.get(ev["key"]))
-        time.sleep(0.5)
+        time.sleep(TELEGRAM_SEND_DELAY)
 
     # 요약은 계속 고정해두고 수정하는 대신, 변동(체결 이벤트 또는 레버리지 변경)이
     # 있을 때만 새 메시지로 보낸다. 고정(pin) 기능은 쓰지 않는다.
-    if fill_events or lever_events:
+    if total_events or lever_events:
         tg_send(format_summary(curr_positions))
 
-    if fills:
-        state["last_bill_id"] = fills[-1]["billId"]
     state["positions"] = curr_positions
     state["thread_root_message_id"] = thread_ids
     save_state(state)
-    print(f"실행 완료: 체결 {len(fills)}건 -> 이벤트 {len(fill_events) + len(lever_events)}건 처리")
+    print(f"실행 완료: 체결 {len(fills)}건 -> 이벤트 {total_events + len(lever_events)}건 처리")
 
 
 if __name__ == "__main__":
@@ -622,13 +648,13 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 # 알려진 한계 (필요 시 직접 보완)
 # ---------------------------------------------------------------------------
-# 1. before 파라미터 방향 가정: OKX v5의 일반적인 페이지네이션 관례상 `before=<billId>`는
-#    그 billId보다 "새로운"(더 큰) 기록을 요청하는 파라미터라고 가정하고 구현했다.
-#    실제로 처음 실행해보고 이벤트가 중복되거나 전혀 안 잡히면 이 가정이 틀린 것이니 알려달라.
+# 1. 체크포인트 유실 시 최대 30건까지만 복구: last_bill_id가 없어졌을 때 종목당 최근
+#    30건까지만 "새 것"으로 처리한다. 그 이상 쌓여있었다면 일부는 놓친다 (반대로 30건을
+#    한꺼번에 텔레그램으로 쏟아붓다 레이트리밋에 걸려 무한 실패하는 것보다는 낫다는 절충).
 # 2. 청산/ADL 등 특수 체결: 강제청산(liquidation)이나 자동감산(ADL)으로 발생한 체결도
 #    일반 체결과 동일하게 처리한다 (오히려 이런 경우일수록 놓치면 안 되는 이벤트라 의도된 동작).
 # 3. 레버리지 변경은 체결 기록에 남지 않아 여전히 "5분 간격 스냅샷 비교"로만 감지된다
 #    (수량 변화와 동시에 일어난 경우가 아니라 순수 레버리지 조정만 있었던 경우).
-# 4. 체크포인트(last_bill_id) 유실: state.json이 어떤 이유로든 소실되면 그 이전 체결들은
-#    다시 조회되지 않는다. GitHub Actions가 매번 state.json을 커밋하므로 일반적인 상황에서는
-#    문제 없지만, 저장소를 통째로 밀어버리는 등의 사고에는 대비가 안 되어 있다.
+# 4. GitHub Actions 워크플로우의 "상태 파일 커밋" 스텝에 if: always()가 걸려있어야,
+#    파이썬 스크립트가 도중에 실패해도 그때까지 진행된 state.json 변경이 커밋된다.
+#    (제공한 워크플로우 파일에는 이미 반영되어 있음 - 직접 워크플로우를 고친 경우 확인 필요)
