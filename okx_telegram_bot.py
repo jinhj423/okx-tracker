@@ -12,10 +12,10 @@ OKX 선물 포지션 <-> 텔레그램 특정 토픽 연동 봇
   그룹의 지정된 토픽(message_thread_id)에 기록을 남긴다. 레버리지만 바뀌고
   수량 변화가 없는 경우는 체결 기록에 남지 않으므로, 이 부분만 별도로 포지션
   스냅샷을 비교해 감지한다.
-- 토픽에는 "진행중인 포지션" 요약을, 변동(체결 또는 레버리지 변경)이 있을 때만
-  새 메시지로 보낸다 (고정/수정 없이 매번 새 채팅으로 쌓인다). 개별 이벤트는
-  별도의 불변 로그 메시지로 쌓이며, 같은 포지션에 속한 이벤트는 최초 진입
-  메시지에 답장(reply)으로 이어붙는다.
+- 토픽 상단에는 "진행중인 포지션" 요약 메시지를 고정해두는데, 계속 같은 메시지를 수정하는
+  대신 변동(체결 또는 레버리지 변경)이 있을 때만 새 메시지를 보내 그걸 새로 고정하고
+  이전 고정은 해제한다. 개별 이벤트는 별도의 불변 로그 메시지로 쌓이며,
+  같은 포지션에 속한 이벤트는 최초 진입 메시지에 답장(reply)으로 이어붙는다.
 - GitHub Actions로 몇 분 간격 폴링하는 구조라 완전한 실시간은 아니지만, 폴링 사이에
   일어난 모든 체결을 하나도 빠짐없이 반영하는 것을 정확도의 핵심으로 삼는다.
 
@@ -373,13 +373,20 @@ def find_close_record(inst_id: str) -> dict | None:
     return max(records, key=lambda r: int(r.get("uTime", "0")))
 
 
+_ZERO_EPS = 1e-8  # 이 값 이하는 "0"으로 취급 (부동소수점 오차로 완전청산이 부분청산으로 오인되는 것 방지)
+
+
 def _classify(old_mag: float, new_mag: float, direction: str, common: dict) -> list[dict]:
-    """포지션 크기(항상 0 이상)의 전/후 비교만으로 이벤트 하나를 만든다."""
+    """포지션 크기(항상 0 이상)의 전/후 비교만으로 이벤트 하나를 만든다.
+    0과의 비교는 정확히 == 0이 아니라 아주 작은 오차범위(_ZERO_EPS) 이내인지로 판단한다.
+    체결 수량들을 누적해서 더하고 빼다 보면 0.00000000003 같은 부동소수점 오차가
+    남을 수 있는데, 이걸 정확히 0이 아니라고 판단해버리면 완전청산이 부분청산으로
+    잘못 인식된다."""
     if abs(new_mag - old_mag) < 1e-12:
         return []
-    if old_mag == 0 and new_mag > 0:
+    if old_mag <= _ZERO_EPS and new_mag > _ZERO_EPS:
         return [{**common, "type": "entry", "direction": direction, "size_before": 0.0, "size_after": new_mag}]
-    if new_mag == 0 and old_mag > 0:
+    if new_mag <= _ZERO_EPS and old_mag > _ZERO_EPS:
         return [{**common, "type": "full_close", "direction": direction, "size_before": old_mag, "size_after": 0.0}]
     if new_mag > old_mag:
         return [{**common, "type": "add", "direction": direction, "size_before": old_mag, "size_after": new_mag}]
@@ -431,7 +438,7 @@ def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict)
             direction = "롱" if pos_side == "long" else "숏"
             events.extend(_classify(old_signed, new_signed, direction, common))
         else:
-            if old_signed != 0 and new_signed != 0 and (old_signed > 0) != (new_signed > 0):
+            if abs(old_signed) > _ZERO_EPS and abs(new_signed) > _ZERO_EPS and (old_signed > 0) != (new_signed > 0):
                 # 한 체결 안에서 방향이 뒤집힌 경우 (반대매매 초과 주문) - 전체청산 + 신규진입으로 분리
                 old_dir = "롱" if old_signed > 0 else "숏"
                 new_dir = "롱" if new_signed > 0 else "숏"
@@ -440,7 +447,7 @@ def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict)
                 events.append({**common, "type": "entry", "direction": new_dir,
                                "size_before": 0.0, "size_after": abs(new_signed)})
             else:
-                ref = new_signed if new_signed != 0 else old_signed
+                ref = new_signed if abs(new_signed) > _ZERO_EPS else old_signed
                 direction = "롱" if ref > 0 else "숏"
                 events.extend(_classify(abs(old_signed), abs(new_signed), direction, common))
 
@@ -594,10 +601,12 @@ def main():
         state["initialized"] = True
         state["last_bill_id"] = get_latest_bill_id()
         print(f"[init] 확보한 체크포인트 last_bill_id={state['last_bill_id']}")
-        tg_send(format_summary(curr_positions))
+        summary_id = tg_send(format_summary(curr_positions))
+        tg_pin(summary_id)
+        state["summary_message_id"] = summary_id
         state["thread_root_message_id"] = {}
         save_state(state)
-        print("최초 실행: 베이스라인 저장 및 요약 메시지 전송 완료")
+        print("최초 실행: 베이스라인 저장 및 요약 메시지 고정 완료")
         return
 
     # last_bill_id가 비어있어도(초기화 당시 조회 실패 등) get_new_fills가 0으로 간주해
@@ -630,12 +639,24 @@ def main():
         tg_send(format_leverage_change(ev["prev"], ev["curr"]), reply_to=thread_ids.get(ev["key"]))
         time.sleep(TELEGRAM_SEND_DELAY)
 
-    # 요약은 계속 고정해두고 수정하는 대신, 변동(체결 이벤트 또는 레버리지 변경)이
-    # 있을 때만 새 메시지로 보낸다. 고정(pin) 기능은 쓰지 않는다.
+    # 요약은 변동(체결 이벤트 또는 레버리지 변경)이 있을 때만 새 메시지로 다시 보내고,
+    # 그걸 새로 고정한 뒤 이전 고정은 해제한다.
+    summary_id = state.get("summary_message_id")
     if total_events or lever_events:
-        tg_send(format_summary(curr_positions))
+        old_summary_id = summary_id
+        summary_id = tg_send(format_summary(curr_positions))
+        tg_pin(summary_id)
+        if old_summary_id:
+            try:
+                tg_unpin(old_summary_id)
+            except Exception as e:
+                print(f"이전 요약 메시지 고정 해제 실패 (무시하고 진행): {e}")
+    elif not summary_id:
+        summary_id = tg_send(format_summary(curr_positions))
+        tg_pin(summary_id)
 
     state["positions"] = curr_positions
+    state["summary_message_id"] = summary_id
     state["thread_root_message_id"] = thread_ids
     save_state(state)
     print(f"실행 완료: 체결 {len(fills)}건 -> 이벤트 {total_events + len(lever_events)}건 처리")
