@@ -12,10 +12,10 @@ OKX 선물 포지션 <-> 텔레그램 특정 토픽 연동 봇
   그룹의 지정된 토픽(message_thread_id)에 기록을 남긴다. 레버리지만 바뀌고
   수량 변화가 없는 경우는 체결 기록에 남지 않으므로, 이 부분만 별도로 포지션
   스냅샷을 비교해 감지한다.
-- 토픽 상단에는 "진행중인 포지션" 요약 메시지를 고정해두는데, 계속 같은 메시지를 수정하는
-  대신 변동(체결 또는 레버리지 변경)이 있을 때만 새 메시지를 보내 그걸 새로 고정하고
-  이전 고정은 해제한다. 개별 이벤트는 별도의 불변 로그 메시지로 쌓이며,
-  같은 포지션에 속한 이벤트는 최초 진입 메시지에 답장(reply)으로 이어붙는다.
+- 토픽에는 "진행중인 포지션" 요약을, 변동(체결 또는 레버리지 변경)이 있을 때만
+  새 메시지로 보낸다 (고정/수정 없이 매번 새 채팅으로 쌓인다). 개별 이벤트는
+  별도의 불변 로그 메시지로 쌓이며, 같은 포지션에 속한 이벤트는 최초 진입
+  메시지에 답장(reply)으로 이어붙는다.
 - GitHub Actions로 몇 분 간격 폴링하는 구조라 완전한 실시간은 아니지만, 폴링 사이에
   일어난 모든 체결을 하나도 빠짐없이 반영하는 것을 정확도의 핵심으로 삼는다.
 
@@ -128,16 +128,15 @@ def get_fills_history(inst_type: str, before: str | None = None, limit: int = 10
 
 def get_new_fills(last_bill_id: str | None) -> list[dict]:
     """직전 체크포인트 이후 발생한 모든 체결을, 오래된 순서로 정렬해 반환한다.
-    체크포인트가 없으면(비정상 상황) 과거 이력을 소급 처리하지 않기 위해 빈 리스트를 반환.
+    체크포인트가 없으면(비정상 복구 상황) 0으로 간주해 최근 체결(최대 100건)을 전부
+    '새 것'으로 취급한다 - 트레이드를 조용히 누락시키는 것보다는 낫다는 판단.
 
     OKX의 `before` 파라미터가 정확히 어느 방향을 반환하는지 100% 확신할 수 없어서
     (문서상 관례로는 "이 billId보다 새로운 것"이지만, 실제 이 파라미터에 의존하다가
     아무것도 안 잡히는 문제가 있었다) - 아예 그 파라미터 없이 최근 체결 목록을
     통째로 가져온 뒤, billId를 직접 숫자로 비교해서 새 것만 걸러낸다. 이러면
     페이지네이션 파라미터의 방향에 의존하지 않아도 된다."""
-    if not last_bill_id:
-        return []
-    last_bid = int(last_bill_id)
+    last_bid = int(last_bill_id) if last_bill_id else 0
     all_fills = []
     for inst_type in INST_TYPES:
         try:
@@ -300,10 +299,33 @@ def direction_label(p: dict) -> str:
     return "롱" if p["posSide"] == "long" else "숏"
 
 
-def fmt_num(x, decimals: int = 2) -> str:
+def _leading_zero_count(ax: float) -> int:
+    """0 < ax < 1 일 때, 소수점 이후 첫 유효숫자가 나오기 전까지의 0 개수."""
+    s = f"{ax:.15f}"
+    frac = s.split(".")[1]
+    count = 0
+    for ch in frac:
+        if ch == "0":
+            count += 1
+        else:
+            break
+    return count
+
+
+def fmt_num(x, decimals: int = 3) -> str:
+    """숫자를 보기 좋게 반올림한다. 기본은 소수점 3자리.
+    다만 도지코인처럼 값이 작아서 3자리로도 유효숫자가 1개뿐인 경우
+    (예: 0.008 -> '8' 하나만 보임) 유효숫자가 2개 이상 보일 때까지
+    자릿수를 자동으로 늘린다 (예: 0.008234 -> 0.0082, 4자리)."""
     x = float(x)
-    # 소수점 불필요한 0 제거, 표시 자릿수는 기본 2자리까지만
-    s = f"{x:.{decimals}f}".rstrip("0").rstrip(".")
+    if x == 0:
+        return "0"
+    ax = abs(x)
+    if ax >= 1:
+        d = decimals
+    else:
+        d = min(max(decimals, _leading_zero_count(ax) + 2), 10)  # 10자리는 안전 상한
+    s = f"{x:.{d}f}".rstrip("0").rstrip(".")
     return s if s else "0"
 
 
@@ -553,14 +575,14 @@ def main():
         state["initialized"] = True
         state["last_bill_id"] = get_latest_bill_id()
         print(f"[init] 확보한 체크포인트 last_bill_id={state['last_bill_id']}")
-        summary_id = tg_send(format_summary(curr_positions))
-        tg_pin(summary_id)
-        state["summary_message_id"] = summary_id
+        tg_send(format_summary(curr_positions))
         state["thread_root_message_id"] = {}
         save_state(state)
-        print("최초 실행: 베이스라인 저장 및 요약 메시지 고정 완료")
+        print("최초 실행: 베이스라인 저장 및 요약 메시지 전송 완료")
         return
 
+    # last_bill_id가 비어있어도(초기화 당시 조회 실패 등) get_new_fills가 0으로 간주해
+    # 최근 체결을 전부 "새 것"으로 처리하므로, 별도 분기 없이 그대로 호출하면 된다.
     fills = get_new_fills(last_bill_id)
     fill_events = process_fills(fills, prev_positions, curr_positions)
     lever_events = detect_leverage_changes(prev_positions, curr_positions)
@@ -580,27 +602,14 @@ def main():
         tg_send(format_leverage_change(ev["prev"], ev["curr"]), reply_to=thread_ids.get(ev["key"]))
         time.sleep(0.5)
 
-    # 요약은 "계속 수정"하는 대신, 변동(체결 이벤트 또는 레버리지 변경)이 있을 때만
-    # 새 메시지로 다시 보내고, 그걸 새로 고정한 뒤 이전 고정은 해제한다.
-    summary_id = state.get("summary_message_id")
+    # 요약은 계속 고정해두고 수정하는 대신, 변동(체결 이벤트 또는 레버리지 변경)이
+    # 있을 때만 새 메시지로 보낸다. 고정(pin) 기능은 쓰지 않는다.
     if fill_events or lever_events:
-        old_summary_id = summary_id
-        summary_id = tg_send(format_summary(curr_positions))
-        tg_pin(summary_id)
-        if old_summary_id:
-            try:
-                tg_unpin(old_summary_id)
-            except Exception as e:
-                print(f"이전 요약 메시지 고정 해제 실패 (무시하고 진행): {e}")
-    elif not summary_id:
-        # 요약 메시지가 아예 없는 상태(최초 고정이 실패했던 경우 등)라면 한 번은 보내둔다
-        summary_id = tg_send(format_summary(curr_positions))
-        tg_pin(summary_id)
+        tg_send(format_summary(curr_positions))
 
     if fills:
         state["last_bill_id"] = fills[-1]["billId"]
     state["positions"] = curr_positions
-    state["summary_message_id"] = summary_id
     state["thread_root_message_id"] = thread_ids
     save_state(state)
     print(f"실행 완료: 체결 {len(fills)}건 -> 이벤트 {len(fill_events) + len(lever_events)}건 처리")
