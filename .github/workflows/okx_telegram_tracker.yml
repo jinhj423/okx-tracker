@@ -16,6 +16,8 @@ concurrency:
 jobs:
   track:
     runs-on: ubuntu-latest
+    timeout-minutes: 3   # 평소 몇~십 초면 끝남. GitHub 인프라 장애 등으로 안 끝나면 강제 종료해
+                          # 다음 5분 주기 실행이 계속 대기열에 막히는 걸 방지
     permissions:
       contents: write
     steps:
