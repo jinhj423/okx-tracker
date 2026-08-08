@@ -390,11 +390,13 @@ def fmt_num(x, decimals: int = 3) -> str:
         return "0"
     ax = abs(x)
     if ax >= 1:
-        d = decimals
-    else:
-        d = min(max(decimals, _leading_zero_count(ax) + 2), 10)  # 10자리는 안전 상한
-    s = f"{x:.{d}f}".rstrip("0").rstrip(".")
-    return s if s else "0"
+        # 1 이상인 값은 불필요한 끝자리 0을 지워도 유효숫자 손실 걱정이 없다
+        s = f"{x:.{decimals}f}".rstrip("0").rstrip(".")
+        return s if s else "0"
+    # 1 미만인 값은 늘린 자릿수(d)가 "최소 유효숫자 2개 보장"을 위한 것이므로,
+    # 끝자리가 우연히 0이어도 지우지 않는다 (지우면 그 보장이 깨진다 - 예: 0.070 -> 0.07)
+    d = min(max(decimals, _leading_zero_count(ax) + 2), 10)  # 10자리는 안전 상한
+    return f"{x:.{d}f}"
 
 
 def ticker(inst_id: str) -> str:
