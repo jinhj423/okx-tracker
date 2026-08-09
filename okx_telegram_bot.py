@@ -557,16 +557,33 @@ def format_fill_event(ev: dict) -> str:
         closed_pct = closed / ev["size_before"] * 100 if ev["size_before"] else 0
         entry_px = ev.get("entry_px")
         label = "부분청산"
+        pnl_line = ""
         if entry_px:
-            is_profit = (ev["fill_px"] >= entry_px) if direction == "롱" else (ev["fill_px"] <= entry_px)
-            label = "부분익절" if is_profit else "부분손절"
+            sign = 1 if direction == "롱" else -1
+            price_return_pct = (ev["fill_px"] - entry_px) / entry_px * 100 * sign
+            label = "부분익절" if price_return_pct >= 0 else "부분손절"
+
+            actual_qty, _ccy = contracts_to_actual(inst_id, closed)
+            if actual_qty is not None:
+                pnl_amount = (ev["fill_px"] - entry_px) * actual_qty * sign
+                try:
+                    lev = float(ev.get("lever") or 1)
+                except (TypeError, ValueError):
+                    lev = 1.0
+                pnl_pct_leveraged = price_return_pct * lev
+                quote_ccy = inst_id.split("-")[1] if "-" in inst_id else ""
+                sign_str = "+" if pnl_amount >= 0 else ""
+                pnl_line = f"수익금: {sign_str}{fmt_num(pnl_amount)} {quote_ccy}  (수익률 {pnl_pct_leveraged:+.2f}%)\n"
+
         return (
             f"🟡 <b>[{label}]</b>\n"
             f"{inst_id}\n"
             f"방향: {direction}  |  레버리지: {lever}배\n"
             f"{qty_line(inst_id, closed, label='청산 수량')}  (보유 물량의 {closed_pct:.1f}%)\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
-            f"{qty_line(inst_id, ev['size_after'], label='잔여 수량')}"
+            f"{pnl_line}"
+            f"{qty_line(inst_id, ev['size_after'], label='잔여 수량')}\n"
+            f"※ 수수료·펀딩비 미반영 추정치이며, 정확한 값은 계좌 체결내역에서 확인하세요"
         )
 
     if ev["type"] == "full_close":
