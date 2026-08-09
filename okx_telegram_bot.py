@@ -582,8 +582,7 @@ def format_fill_event(ev: dict) -> str:
             f"{qty_line(inst_id, closed, label='청산 수량')}  (보유 물량의 {closed_pct:.1f}%)\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
             f"{pnl_line}"
-            f"{qty_line(inst_id, ev['size_after'], label='잔여 수량')}\n"
-            f"※ 수수료·펀딩비 미반영 추정치이며, 정확한 값은 계좌 체결내역에서 확인하세요"
+            f"{qty_line(inst_id, ev['size_after'], label='잔여 수량')}"
         )
 
     if ev["type"] == "full_close":
