@@ -417,15 +417,24 @@ def build_snapshot_map(positions: list[dict]) -> dict:
 
 
 def find_close_record(inst_id: str) -> dict | None:
-    """positions-history에서 가장 최근 정산 기록을 찾는다 (거래소가 확정한 realized pnl)."""
-    try:
-        records = get_positions_history(inst_id, limit=5)
-    except Exception:
-        return None
-    if not records:
-        return None
-    # uTime(정산 시각) 기준 가장 최근 것
-    return max(records, key=lambda r: int(r.get("uTime", "0")))
+    """positions-history에서 "방금" 청산된 것에 해당하는 정산 기록을 찾는다.
+    OKX가 정산 기록을 만드는 데 약간의 지연이 있을 수 있어 짧게 재시도하고,
+    가장 최근 것이라 해도 너무 오래된(=지금 이 청산과 무관한 예전) 기록이면
+    무시한다 - 이게 없으면 예전에 같은 종목을 청산했던 엉뚱한 기록을
+    "방금 청산 결과"인 것처럼 잘못 보여줄 수 있다."""
+    now_ms = int(time.time() * 1000)
+    for attempt in range(3):
+        try:
+            records = get_positions_history(inst_id, limit=5)
+        except Exception:
+            records = []
+        if records:
+            latest = max(records, key=lambda r: int(r.get("uTime", "0")))
+            if now_ms - int(latest.get("uTime", "0")) <= 10 * 60 * 1000:  # 10분 이내 것만 신뢰
+                return latest
+        if attempt < 2:
+            time.sleep(3)
+    return None
 
 
 _ZERO_EPS = 1e-8  # 이 값 이하는 "0"으로 취급 (부동소수점 오차로 완전청산이 부분청산으로 오인되는 것 방지)
