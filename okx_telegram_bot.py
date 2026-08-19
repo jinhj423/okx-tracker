@@ -109,6 +109,16 @@ def get_positions() -> list[dict]:
     return [p for p in out if float(p.get("pos", "0") or "0") != 0]
 
 
+def get_account_balance() -> dict:
+    """계좌 전체 자산 정보 (총 자본 totalEq 등) - 포지션 비중 계산에 사용."""
+    try:
+        data = okx_request("GET", "/api/v5/account/balance", {})
+        return data[0] if data else {}
+    except Exception as e:
+        print(f"계좌 잔고 조회 실패: {e}")
+        return {}
+
+
 def get_positions_history(inst_id: str, limit: int = 5) -> list[dict]:
     """완전히 청산된 포지션의 정산 기록 (실현손익 등 거래소가 확정한 값)."""
     return okx_request(
@@ -636,7 +646,7 @@ def format_leverage_change(prev: dict, curr: dict) -> str:
     )
 
 
-def format_summary(curr_positions: dict) -> str:
+def format_summary(curr_positions: dict, total_eq: float = 0.0) -> str:
     if not curr_positions:
         return "📌 <b>진행중인 포지션</b> 📌\n\n보유 중인 포지션 없음"
 
@@ -644,7 +654,10 @@ def format_summary(curr_positions: dict) -> str:
     for p in curr_positions.values():
         emoji = "📈" if direction_label(p) == "롱" else "📉"
         pnl_pct = float(p.get("uplRatio", 0) or 0) * 100
-        rows.append((emoji, ticker(p["instId"]), direction_word(p), f"{p['lever']}x", fmt_num(p["avgPx"]), f"{pnl_pct:+.2f}%"))
+        # 이 포지션에 물려있는 증거금(imr, 격리모드면 margin) / 계좌 총자본 = 계좌 대비 비중
+        margin_used = float(p.get("imr") or p.get("margin") or 0)
+        weight = f"{margin_used / total_eq * 100:.1f}%" if total_eq > 0 else "-"
+        rows.append((emoji, ticker(p["instId"]), direction_word(p), f"{p['lever']}x", fmt_num(p["avgPx"]), f"{pnl_pct:+.2f}%", weight))
 
     # 종목마다 글자 수가 달라서, 열 너비를 데이터에 맞춰 자동으로 맞춘다
     # (참고: <pre>/<code>는 텔레그램이 "복사" 버튼을 자동으로 붙이는 코드블록 UI라
@@ -657,8 +670,11 @@ def format_summary(curr_positions: dict) -> str:
     pnl_w = max(len(r[5]) for r in rows) + 1
 
     lines = ["📌 <b>진행중인 포지션</b> 📌", ""]
-    for emoji, tk, dw, lv, px, pnl in rows:
-        lines.append(f"{emoji} {tk.ljust(tick_w)} {dw.ljust(dir_w)} {lv.ljust(lev_w)} {px.rjust(px_w)}  {pnl.rjust(pnl_w)}")
+    for emoji, tk, dw, lv, px, pnl, weight in rows:
+        lines.append(
+            f"{emoji} {tk.ljust(tick_w)} {dw.ljust(dir_w)} {lv.ljust(lev_w)} {px.rjust(px_w)}  "
+            f"{pnl.rjust(pnl_w)}  (비중 {weight})"
+        )
     lines.append("")
     lines.append(f"<i>갱신: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</i>")
     return "\n".join(lines)
@@ -676,6 +692,7 @@ def main():
 
     curr_positions_list = get_positions()
     curr_positions = build_snapshot_map(curr_positions_list)
+    total_eq = float((get_account_balance() or {}).get("totalEq") or 0)  # 계좌 총자본 - 포지션 비중 계산용
 
     # 최초 실행: 이미 보유 중인 포지션을 "신규 진입"으로 오인하지 않도록 베이스라인만 저장하고,
     # 이후 체결을 빠짐없이 조회하기 위한 체크포인트(가장 최근 체결의 billId)를 확보한다.
@@ -684,7 +701,7 @@ def main():
         state["initialized"] = True
         state["last_bill_id"] = get_latest_bill_id()
         print(f"[init] 확보한 체크포인트 last_bill_id={state['last_bill_id']}")
-        summary_id = tg_send(format_summary(curr_positions))
+        summary_id = tg_send(format_summary(curr_positions, total_eq))
         tg_pin(summary_id)
         state["summary_message_id"] = summary_id
         state["thread_root_message_id"] = {}
@@ -728,7 +745,7 @@ def main():
     summary_id = state.get("summary_message_id")
     if total_events or lever_events:
         old_summary_id = summary_id
-        summary_id = tg_send(format_summary(curr_positions))
+        summary_id = tg_send(format_summary(curr_positions, total_eq))
         tg_pin(summary_id)
         if old_summary_id:
             try:
@@ -736,7 +753,7 @@ def main():
             except Exception as e:
                 print(f"이전 요약 메시지 고정 해제 실패 (무시하고 진행): {e}")
     elif not summary_id:
-        summary_id = tg_send(format_summary(curr_positions))
+        summary_id = tg_send(format_summary(curr_positions, total_eq))
         tg_pin(summary_id)
 
     state["positions"] = curr_positions
