@@ -643,7 +643,8 @@ def format_summary(curr_positions: dict) -> str:
     rows = []
     for p in curr_positions.values():
         emoji = "📈" if direction_label(p) == "롱" else "📉"
-        rows.append((emoji, ticker(p["instId"]), direction_word(p), f"{p['lever']}x", fmt_num(p["avgPx"])))
+        pnl_pct = float(p.get("uplRatio", 0) or 0) * 100
+        rows.append((emoji, ticker(p["instId"]), direction_word(p), f"{p['lever']}x", fmt_num(p["avgPx"]), f"{pnl_pct:+.2f}%"))
 
     # 종목마다 글자 수가 달라서, 열 너비를 데이터에 맞춰 자동으로 맞춘다
     # (참고: <pre>/<code>는 텔레그램이 "복사" 버튼을 자동으로 붙이는 코드블록 UI라
@@ -652,10 +653,12 @@ def format_summary(curr_positions: dict) -> str:
     tick_w = max(len(r[1]) for r in rows) + 1
     dir_w = max(len(r[2]) for r in rows) + 1
     lev_w = max(len(r[3]) for r in rows) + 1
+    px_w = max(len(r[4]) for r in rows) + 1
+    pnl_w = max(len(r[5]) for r in rows) + 1
 
     lines = ["📌 <b>진행중인 포지션</b> 📌", ""]
-    for emoji, tk, dw, lv, px in rows:
-        lines.append(f"{emoji} {tk.ljust(tick_w)} {dw.ljust(dir_w)} {lv.ljust(lev_w)} {px.rjust(9)}")
+    for emoji, tk, dw, lv, px, pnl in rows:
+        lines.append(f"{emoji} {tk.ljust(tick_w)} {dw.ljust(dir_w)} {lv.ljust(lev_w)} {px.rjust(px_w)}  {pnl.rjust(pnl_w)}")
     lines.append("")
     lines.append(f"<i>갱신: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</i>")
     return "\n".join(lines)
