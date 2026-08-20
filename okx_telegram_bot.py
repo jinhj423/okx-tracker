@@ -657,22 +657,21 @@ def format_summary(curr_positions: dict, total_eq: float = 0.0) -> str:
         # 이 포지션에 물려있는 증거금(imr, 격리모드면 margin) / 계좌 총자본 = 계좌 대비 비중
         margin_used = float(p.get("imr") or p.get("margin") or 0)
         weight = f"{margin_used / total_eq * 100:.1f}%" if total_eq > 0 else "-"
-        rows.append((emoji, ticker(p["instId"]), direction_word(p), f"{p['lever']}x", fmt_num(p["avgPx"]), f"{pnl_pct:+.2f}%", weight))
+        rows.append((emoji, ticker(p["instId"]), f"{p['lever']}x", fmt_num(p["avgPx"]), f"{pnl_pct:+.2f}%", weight))
 
     # 종목마다 글자 수가 달라서, 열 너비를 데이터에 맞춰 자동으로 맞춘다
     # (참고: <pre>/<code>는 텔레그램이 "복사" 버튼을 자동으로 붙이는 코드블록 UI라
     #  일부러 안 쓰고, 일반 텍스트 + 공백 패딩으로 정렬한다. 고정폭 글꼴이 아니라서
     #  <pre>만큼 완벽히 맞진 않지만 슬래시로 나열하던 것보단 훨씬 정돈되어 보인다.)
     tick_w = max(len(r[1]) for r in rows) + 1
-    dir_w = max(len(r[2]) for r in rows) + 1
-    lev_w = max(len(r[3]) for r in rows) + 1
-    px_w = max(len(r[4]) for r in rows) + 1
-    pnl_w = max(len(r[5]) for r in rows) + 1
+    lev_w = max(len(r[2]) for r in rows) + 1
+    px_w = max(len(r[3]) for r in rows) + 1
+    pnl_w = max(len(r[4]) for r in rows) + 1
 
     lines = ["📌 <b>진행중인 포지션</b> 📌", ""]
-    for emoji, tk, dw, lv, px, pnl, weight in rows:
+    for emoji, tk, lv, px, pnl, weight in rows:
         lines.append(
-            f"{emoji} {tk.ljust(tick_w)} {dw.ljust(dir_w)} {lv.ljust(lev_w)} {px.rjust(px_w)}  "
+            f"{emoji} <b>{tk.ljust(tick_w)}</b> {lv.ljust(lev_w)} {px.rjust(px_w)}  "
             f"{pnl.rjust(pnl_w)}  (비중 {weight})"
         )
     lines.append("")
