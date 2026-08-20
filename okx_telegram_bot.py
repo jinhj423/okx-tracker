@@ -650,13 +650,20 @@ def format_summary(curr_positions: dict, total_eq: float = 0.0) -> str:
     if not curr_positions:
         return "📌 <b>진행중인 포지션</b> 📌\n\n보유 중인 포지션 없음"
 
+    # "계좌 대비 비중"의 분모는 지금 이 순간의 평가자산(total_eq)이 아니라, 거기서
+    # 보유 포지션들의 미실현 손익을 뺀 "원금 성격의 계좌"로 쓴다. total_eq를 그대로
+    # 쓰면 포지션이 손실 중일 때 분모 자체가 같이 줄어들어 비중이 100%를 넘어가는
+    # 등 왜곡이 생기기 때문 (평가손익이 계좌를 깎아먹는 만큼 비중이 부풀어 보임).
+    total_upl = sum(float(p.get("upl", 0) or 0) for p in curr_positions.values())
+    base_eq = total_eq - total_upl
+
     rows = []
     for p in curr_positions.values():
         emoji = "📈" if direction_label(p) == "롱" else "📉"
         pnl_pct = float(p.get("uplRatio", 0) or 0) * 100
-        # 이 포지션에 물려있는 증거금(imr, 격리모드면 margin) / 계좌 총자본 = 계좌 대비 비중
+        # 이 포지션에 물려있는 증거금(imr, 격리모드면 margin) / 원금 성격의 계좌 = 계좌 대비 비중
         margin_used = float(p.get("imr") or p.get("margin") or 0)
-        weight = f"{margin_used / total_eq * 100:.1f}%" if total_eq > 0 else "-"
+        weight = f"{margin_used / base_eq * 100:.1f}%" if base_eq > 0 else "-"
         rows.append((emoji, ticker(p["instId"]), f"{p['lever']}x", fmt_num(p["avgPx"]), f"{pnl_pct:+.2f}%", weight))
 
     # 종목마다 글자 수가 달라서, 열 너비를 데이터에 맞춰 자동으로 맞춘다
