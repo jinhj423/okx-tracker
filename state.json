@@ -24,12 +24,12 @@
       "gammaBS": "",
       "gammaPA": "",
       "hedgedPos": "",
-      "idxPx": "2395.5",
+      "idxPx": "2395.91",
       "imr": "3.9523110000000004",
       "instId": "ETH-USDT-SWAP",
       "instType": "SWAP",
       "interest": "",
-      "last": "2395.31",
+      "last": "2395.67",
       "lever": "20",
       "liab": "",
       "liabCcy": "",
@@ -63,9 +63,9 @@
       "tradeId": "4190227329",
       "uTime": "1787304691840",
       "upl": "-0.1844700000000048",
-      "uplLastPx": "-0.1834799999999982",
+      "uplLastPx": "-0.1953600000000024",
       "uplRatio": "-0.0467831363113325",
-      "uplRatioLastPx": "-0.0465320640234346",
+      "uplRatioLastPx": "-0.0495449314781871",
       "usdPx": "0.99966",
       "vegaBS": "",
       "vegaPA": ""
@@ -76,5 +76,5 @@
     "ETH-USDT-SWAP|short": 4827
   },
   "last_bill_id": "3852125695019765762",
-  "last_base_eq": 4.072974404224586
+  "last_base_eq": 4.064766107883159
 }
