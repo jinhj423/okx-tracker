@@ -128,6 +128,56 @@ def get_positions_history(inst_id: str, limit: int = 5) -> list[dict]:
     )
 
 
+def get_order_details(inst_id: str, ord_id: str) -> dict | None:
+    """일반 주문 상세 조회. algoId가 채워져 있으면 이 주문이 알고(TP/SL 등) 트리거로
+    발생한 것임을 뜻한다. category로 강제청산/ADL 여부도 확인 가능."""
+    try:
+        orders = okx_request("GET", "/api/v5/trade/order", {"instId": inst_id, "ordId": ord_id})
+    except Exception:
+        return None
+    return orders[0] if orders else None
+
+
+def get_algo_order_details(inst_id: str, algo_id: str) -> dict | None:
+    """알고 주문(조건부/TP·SL 등) 상세 조회. actualSide 필드가 'tp' 또는 'sl'로
+    실제 어느 쪽이 발동됐는지 알려준다."""
+    try:
+        algos = okx_request("GET", "/api/v5/trade/order-algo", {"instId": inst_id, "algoId": algo_id})
+    except Exception:
+        return None
+    return algos[0] if algos else None
+
+
+def classify_close_reason(inst_id: str, ord_id: str | None) -> str | None:
+    """이 청산이 [직접청산 / TP(익절) / SL(손절) / 강제청산 / ADL] 중 무엇으로 발생했는지 판별.
+    조회 실패 시 None (호출부에서 이 줄 자체를 생략하도록)."""
+    if not ord_id:
+        return None
+    order = get_order_details(inst_id, ord_id)
+    if not order:
+        return None
+
+    category = order.get("category", "")
+    if category == "full_liquidation":
+        return "강제청산(전체)"
+    if category == "partial_liquidation":
+        return "강제청산(일부)"
+    if category == "adl":
+        return "ADL(자동감산)"
+
+    algo_id = order.get("algoId") or (order.get("linkedAlgoOrd") or {}).get("algoId")
+    if not algo_id:
+        return "직접청산"
+
+    algo = get_algo_order_details(inst_id, algo_id)
+    actual_side = (algo or {}).get("actualSide", "")
+    if actual_side == "tp":
+        return "TP(익절)"
+    if actual_side == "sl":
+        return "SL(손절)"
+    return "자동청산"
+
+
 def get_fills_history(inst_type: str, before: str | None = None, limit: int = 100) -> list[dict]:
     """체결(거래 실행) 내역. before=billId를 주면 그 billId보다 새로운 체결만 반환."""
     params = {"instType": inst_type, "limit": str(limit)}
@@ -204,6 +254,7 @@ def merge_fills(fills: list[dict], window_seconds: int = FILL_MERGE_WINDOW_SECON
             "fillPx": str(group["_notional"] / sz) if sz else "0",
             "billId": group["billId"],
             "ts": group["ts"],
+            "ordId": group["ordId"],
         })
 
     for f in fills:
@@ -217,12 +268,13 @@ def merge_fills(fills: list[dict], window_seconds: int = FILL_MERGE_WINDOW_SECON
             group["_last_ts"] = ts
             group["billId"] = f["billId"]  # 마지막 체결의 billId로 갱신
             group["ts"] = f["ts"]
+            group["ordId"] = f.get("ordId")  # 청산 사유 조회용 - 마지막 체결의 주문으로 갱신
         else:
             flush()
             group = {
                 "_key": key, "_sz": sz, "_notional": sz * px, "_last_ts": ts,
                 "instId": f["instId"], "posSide": f["posSide"], "side": f["side"],
-                "billId": f["billId"], "ts": f["ts"],
+                "billId": f["billId"], "ts": f["ts"], "ordId": f.get("ordId"),
             }
     flush()
 
@@ -280,6 +332,34 @@ def qty_line(inst_id: str, contracts, label: str = "수량") -> str:
     if actual is not None and ccy:
         return f"{label}: {n_contracts}계약 ({fmt_num(actual)} {ccy})"
     return f"{label}: {n_contracts}계약"
+
+
+def margin_line(inst_id: str, contracts, price, lever, label: str = "마진") -> str | None:
+    """계약 수 대신 "실제 투입 마진"(증거금) 기준으로 표시할 때 쓴다.
+    마진 = 실제 수량 x 가격 / 레버리지. 계약 액면가를 못 가져오면 None."""
+    actual_qty, _ccy = contracts_to_actual(inst_id, contracts)
+    if actual_qty is None or price is None:
+        return None
+    try:
+        lev = float(lever or 1)
+    except (TypeError, ValueError):
+        lev = 1.0
+    if lev <= 0:
+        lev = 1.0
+    margin = actual_qty * price / lev
+    quote_ccy = inst_id.split("-")[1] if "-" in inst_id else ""
+    return f"{label}: {fmt_num(margin)} {quote_ccy}"
+
+
+_REASON_SHORT = {
+    "직접청산": "직접",
+    "TP(익절)": "TP",
+    "SL(손절)": "SL",
+    "강제청산(전체)": "청산",
+    "강제청산(일부)": "청산",
+    "ADL(자동감산)": "ADL",
+    "자동청산": "자동",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -505,6 +585,7 @@ def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict)
             "fill_px": fill_px,
             "lever": ctx.get("lever"),
             "entry_px": float(ctx["avgPx"]) if ctx.get("avgPx") else None,
+            "ord_id": f.get("ordId"),
         }
 
         events: list[dict] = []
@@ -589,18 +670,29 @@ def format_fill_event(ev: dict) -> str:
             pnl_pct_leveraged = price_return_pct * lev
             pnl_line = f"수익률: {pnl_pct_leveraged:+.2f}%\n"
 
+        reason = classify_close_reason(inst_id, ev.get("ord_id"))
+        reason_tag = f"  |  {_REASON_SHORT.get(reason, reason)}" if reason else ""
+
+        closed_margin = margin_line(inst_id, closed, entry_px, lever, label="청산 마진")
+        closed_line = closed_margin if closed_margin else qty_line(inst_id, closed, label="청산 수량")
+
+        remain = margin_line(inst_id, ev["size_after"], entry_px, lever, label="잔여 마진")
+        remain_line = remain if remain else qty_line(inst_id, ev["size_after"], label="잔여 수량")
+
         return (
             f"🟡 <b>[{label}]</b>\n"
             f"{inst_id}\n"
-            f"방향: {direction}  |  레버리지: {lever}배\n"
-            f"{qty_line(inst_id, closed, label='청산 수량')}  (보유 물량의 {closed_pct:.1f}%)\n"
+            f"방향: {direction}  |  레버리지: {lever}배{reason_tag}\n"
+            f"{closed_line}  (보유 물량의 {closed_pct:.1f}%)\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
             f"{pnl_line}"
-            f"{qty_line(inst_id, ev['size_after'], label='잔여 수량')}"
+            f"{remain_line}"
         )
 
     if ev["type"] == "full_close":
         record = find_close_record(inst_id)
+        reason = classify_close_reason(inst_id, ev.get("ord_id"))
+        reason_tag = f"  |  {_REASON_SHORT.get(reason, reason)}" if reason else ""
         if record:
             pnl_ratio = float(record.get("pnlRatio", 0)) * 100
             open_px = fmt_num(record.get("openAvgPx", ev.get("entry_px") or 0))
@@ -612,7 +704,7 @@ def format_fill_event(ev: dict) -> str:
             return (
                 f"🔴 <b>[전체청산]</b> {result_emoji}\n"
                 f"{inst_id}\n"
-                f"방향: {direction}  |  레버리지: {record.get('lever', lever)}배\n"
+                f"방향: {direction}  |  레버리지: {record.get('lever', lever)}배{reason_tag}\n"
                 f"진입가: {open_px}  →  청산가: {close_px}\n"
                 f"{hold_line}"
                 f"실현손익률: {pnl_ratio:+.2f}%"
@@ -621,7 +713,7 @@ def format_fill_event(ev: dict) -> str:
         return (
             f"🔴 <b>[전체청산]</b>\n"
             f"{inst_id}\n"
-            f"방향: {direction}  |  레버리지: {lever}배\n"
+            f"방향: {direction}  |  레버리지: {lever}배{reason_tag}\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
             f"※ 실현손익 정산 데이터 반영 대기 중 (다음 갱신에서 계좌 정산 내역 직접 확인 권장)"
         )
