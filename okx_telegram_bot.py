@@ -341,6 +341,10 @@ def margin_line(inst_id: str, contracts, price, lever, label: str = "마진") ->
     if actual_qty is None or price is None:
         return None
     try:
+        price = float(price)
+    except (TypeError, ValueError):
+        return None
+    try:
         lev = float(lever or 1)
     except (TypeError, ValueError):
         lev = 1.0
@@ -632,24 +636,31 @@ def format_fill_event(ev: dict) -> str:
     lever = ev.get("lever") or "?"
 
     if ev["type"] == "entry":
+        entry_margin = margin_line(inst_id, ev["size_after"], ev["fill_px"], lever, label="마진")
+        margin_line_txt = entry_margin if entry_margin else qty_line(inst_id, ev["size_after"])
         return (
             f"🟢 <b>[신규 진입]</b>\n"
             f"{inst_id}\n"
             f"방향: {direction}  |  레버리지: {lever}배\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
-            f"{qty_line(inst_id, ev['size_after'])}"
+            f"{margin_line_txt}"
         )
 
     if ev["type"] == "add":
         added = ev["size_after"] - ev["size_before"]
         add_pct = added / ev["size_before"] * 100 if ev["size_before"] else 0
+        # "추가로 투입한 마진"은 이번 체결가 기준, "총 마진"은 갱신된 평단가(entry_px) 기준
+        added_margin = margin_line(inst_id, added, ev["fill_px"], lever, label="추가 마진")
+        added_line = added_margin if added_margin else qty_line(inst_id, added, label="추가 수량")
+        total_margin = margin_line(inst_id, ev["size_after"], ev.get("entry_px") or ev["fill_px"], lever, label="현재 총 마진")
+        total_line = total_margin if total_margin else qty_line(inst_id, ev["size_after"], label="현재 총 수량")
         return (
             f"🔵 <b>[추가매수]</b>\n"
             f"{inst_id}\n"
             f"방향: {direction}  |  레버리지: {lever}배\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
-            f"{qty_line(inst_id, added, label='추가 수량')}  (기존 대비 +{add_pct:.1f}%)\n"
-            f"{qty_line(inst_id, ev['size_after'], label='현재 총 수량')}"
+            f"{added_line}  (기존 대비 +{add_pct:.1f}%)\n"
+            f"{total_line}"
         )
 
     if ev["type"] == "partial_close":
@@ -723,12 +734,15 @@ def format_fill_event(ev: dict) -> str:
 
 def format_leverage_change(prev: dict, curr: dict) -> str:
     direction = direction_label(curr)
+    margin_txt = margin_line(curr["instId"], curr["pos"], curr["avgPx"], curr.get("lever"), label="마진")
+    if not margin_txt:
+        margin_txt = qty_line(curr["instId"], curr["pos"])
     return (
         f"⚙️ <b>[레버리지 변경]</b>\n"
         f"{curr['instId']}\n"
         f"방향: {direction}\n"
         f"레버리지: {prev.get('lever')}배 → {curr.get('lever')}배\n"
-        f"{qty_line(curr['instId'], curr['pos'])}  |  평단가: {fmt_num(curr['avgPx'])}"
+        f"{margin_txt}  |  평단가: {fmt_num(curr['avgPx'])}"
     )
 
 
