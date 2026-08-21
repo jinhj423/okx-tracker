@@ -732,13 +732,16 @@ def format_leverage_change(prev: dict, curr: dict) -> str:
     )
 
 
-def format_summary(curr_positions: dict, total_eq: float = 0.0) -> str:
-    # "계좌 대비 비중"의 분모는 지금 이 순간의 평가자산(total_eq)이 아니라, 거기서
-    # 보유 포지션들의 미실현 손익을 뺀 "원금 성격의 계좌(시드)"로 쓴다. total_eq를 그대로
-    # 쓰면 포지션이 손실 중일 때 분모 자체가 같이 줄어들어 비중이 100%를 넘어가는
-    # 등 왜곡이 생기기 때문 (평가손익이 계좌를 깎아먹는 만큼 비중이 부풀어 보임).
+def compute_base_eq(curr_positions: dict, total_eq: float) -> float:
+    """평가자산(total_eq)에서 보유 포지션들의 미실현 손익을 뺀 "원금 성격의 계좌(시드)".
+    total_eq를 그대로 쓰면 포지션이 손실 중일 때 분모 자체가 같이 줄어들어 비중이
+    100%를 넘어가는 등 왜곡이 생기기 때문에, 이 값을 비중 계산과 시드 표시에 공통으로 쓴다."""
     total_upl = sum(float(p.get("upl", 0) or 0) for p in curr_positions.values())
-    base_eq = total_eq - total_upl
+    return total_eq - total_upl
+
+
+def format_summary(curr_positions: dict, total_eq: float = 0.0) -> str:
+    base_eq = compute_base_eq(curr_positions, total_eq)
     seed_line = f"시드: {fmt_num(base_eq)} USD" if base_eq > 0 else "시드: -"
 
     if not curr_positions:
@@ -793,6 +796,7 @@ def main():
         state["positions"] = curr_positions
         state["initialized"] = True
         state["last_bill_id"] = get_latest_bill_id()
+        state["last_base_eq"] = compute_base_eq(curr_positions, total_eq)
         print(f"[init] 확보한 체크포인트 last_bill_id={state['last_bill_id']}")
         summary_id = tg_send(format_summary(curr_positions, total_eq))
         tg_pin(summary_id)
@@ -833,10 +837,16 @@ def main():
         tg_send(format_leverage_change(ev["prev"], ev["curr"]), reply_to=thread_ids.get(ev["key"]))
         time.sleep(TELEGRAM_SEND_DELAY)
 
-    # 요약은 변동(체결 이벤트 또는 레버리지 변경)이 있을 때만 새 메시지로 다시 보내고,
-    # 그걸 새로 고정한 뒤 이전 고정은 해제한다.
+    # 요약은 변동(체결 이벤트 / 레버리지 변경 / 입출금으로 인한 시드 변화)이 있을 때만
+    # 새 메시지로 다시 보내고, 그걸 새로 고정한 뒤 이전 고정은 해제한다.
+    # (입출금은 체결이 아니라서 total_events/lever_events로는 안 잡히므로, 시드 자체를
+    # 직전 실행과 비교해서 의미 있게(1 USD 이상) 바뀌었으면 그것도 갱신 사유로 취급한다.)
+    base_eq_now = compute_base_eq(curr_positions, total_eq)
+    prev_base_eq = state.get("last_base_eq")
+    seed_changed = prev_base_eq is not None and abs(base_eq_now - prev_base_eq) > 1.0
+
     summary_id = state.get("summary_message_id")
-    if total_events or lever_events:
+    if total_events or lever_events or seed_changed:
         old_summary_id = summary_id
         summary_id = tg_send(format_summary(curr_positions, total_eq))
         tg_pin(summary_id)
@@ -852,8 +862,10 @@ def main():
     state["positions"] = curr_positions
     state["summary_message_id"] = summary_id
     state["thread_root_message_id"] = thread_ids
+    state["last_base_eq"] = base_eq_now
     save_state(state)
-    print(f"실행 완료: 체결 {len(fills)}건 -> 이벤트 {total_events + len(lever_events)}건 처리")
+    print(f"실행 완료: 체결 {len(fills)}건 -> 이벤트 {total_events + len(lever_events)}건 처리"
+          f"{' (+시드 변화 감지)' if seed_changed else ''}")
 
 
 if __name__ == "__main__":
