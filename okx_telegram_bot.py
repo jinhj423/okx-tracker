@@ -582,17 +582,12 @@ def format_fill_event(ev: dict) -> str:
             price_return_pct = (ev["fill_px"] - entry_px) / entry_px * 100 * sign
             label = "부분익절" if price_return_pct >= 0 else "부분손절"
 
-            actual_qty, _ccy = contracts_to_actual(inst_id, closed)
-            if actual_qty is not None:
-                pnl_amount = (ev["fill_px"] - entry_px) * actual_qty * sign
-                try:
-                    lev = float(ev.get("lever") or 1)
-                except (TypeError, ValueError):
-                    lev = 1.0
-                pnl_pct_leveraged = price_return_pct * lev
-                quote_ccy = inst_id.split("-")[1] if "-" in inst_id else ""
-                sign_str = "+" if pnl_amount >= 0 else ""
-                pnl_line = f"수익금: {sign_str}{fmt_num(pnl_amount)} {quote_ccy}  (수익률 {pnl_pct_leveraged:+.2f}%)\n"
+            try:
+                lev = float(ev.get("lever") or 1)
+            except (TypeError, ValueError):
+                lev = 1.0
+            pnl_pct_leveraged = price_return_pct * lev
+            pnl_line = f"수익률: {pnl_pct_leveraged:+.2f}%\n"
 
         return (
             f"🟡 <b>[{label}]</b>\n"
@@ -608,7 +603,6 @@ def format_fill_event(ev: dict) -> str:
         record = find_close_record(inst_id)
         if record:
             pnl_ratio = float(record.get("pnlRatio", 0)) * 100
-            pnl = fmt_num(record.get("pnl", 0))
             open_px = fmt_num(record.get("openAvgPx", ev.get("entry_px") or 0))
             close_px = fmt_num(record.get("closeAvgPx", ev["fill_px"]))
             hold_ms = int(record.get("uTime", 0)) - int(record.get("cTime", 0))
@@ -621,7 +615,7 @@ def format_fill_event(ev: dict) -> str:
                 f"방향: {direction}  |  레버리지: {record.get('lever', lever)}배\n"
                 f"진입가: {open_px}  →  청산가: {close_px}\n"
                 f"{hold_line}"
-                f"실현손익: {pnl}  ({pnl_ratio:+.2f}%)"
+                f"실현손익률: {pnl_ratio:+.2f}%"
             )
         # positions-history에 아직 반영 안 된 경우의 폴백 (다음 실행에서는 조회 가능해짐)
         return (
@@ -647,15 +641,16 @@ def format_leverage_change(prev: dict, curr: dict) -> str:
 
 
 def format_summary(curr_positions: dict, total_eq: float = 0.0) -> str:
-    if not curr_positions:
-        return "📌 <b>진행중인 포지션</b> 📌\n\n보유 중인 포지션 없음"
-
     # "계좌 대비 비중"의 분모는 지금 이 순간의 평가자산(total_eq)이 아니라, 거기서
-    # 보유 포지션들의 미실현 손익을 뺀 "원금 성격의 계좌"로 쓴다. total_eq를 그대로
+    # 보유 포지션들의 미실현 손익을 뺀 "원금 성격의 계좌(시드)"로 쓴다. total_eq를 그대로
     # 쓰면 포지션이 손실 중일 때 분모 자체가 같이 줄어들어 비중이 100%를 넘어가는
     # 등 왜곡이 생기기 때문 (평가손익이 계좌를 깎아먹는 만큼 비중이 부풀어 보임).
     total_upl = sum(float(p.get("upl", 0) or 0) for p in curr_positions.values())
     base_eq = total_eq - total_upl
+    seed_line = f"시드: {fmt_num(base_eq)} USD" if base_eq > 0 else "시드: -"
+
+    if not curr_positions:
+        return f"📌 <b>진행중인 포지션</b> 📌\n{seed_line}\n\n보유 중인 포지션 없음"
 
     rows = []
     for p in curr_positions.values():
@@ -675,7 +670,7 @@ def format_summary(curr_positions: dict, total_eq: float = 0.0) -> str:
     px_w = max(len(r[3]) for r in rows) + 1
     pnl_w = max(len(r[4]) for r in rows) + 1
 
-    lines = ["📌 <b>진행중인 포지션</b> 📌", ""]
+    lines = ["📌 <b>진행중인 포지션</b> 📌", seed_line, ""]
     for emoji, tk, lv, px, pnl, weight in rows:
         lines.append(
             f"{emoji} <b>{tk.ljust(tick_w)}</b> {lv.ljust(lev_w)} {px.rjust(px_w)}  "
