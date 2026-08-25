@@ -510,27 +510,6 @@ def build_snapshot_map(positions: list[dict]) -> dict:
     return {position_key(p): p for p in positions}
 
 
-def find_close_record(inst_id: str) -> dict | None:
-    """positions-history에서 "방금" 청산된 것에 해당하는 정산 기록을 찾는다.
-    OKX가 정산 기록을 만드는 데 약간의 지연이 있을 수 있어 짧게 재시도하고,
-    가장 최근 것이라 해도 너무 오래된(=지금 이 청산과 무관한 예전) 기록이면
-    무시한다 - 이게 없으면 예전에 같은 종목을 청산했던 엉뚱한 기록을
-    "방금 청산 결과"인 것처럼 잘못 보여줄 수 있다."""
-    now_ms = int(time.time() * 1000)
-    for attempt in range(3):
-        try:
-            records = get_positions_history(inst_id, limit=5)
-        except Exception:
-            records = []
-        if records:
-            latest = max(records, key=lambda r: int(r.get("uTime", "0")))
-            if now_ms - int(latest.get("uTime", "0")) <= 10 * 60 * 1000:  # 10분 이내 것만 신뢰
-                return latest
-        if attempt < 2:
-            time.sleep(3)
-    return None
-
-
 _ZERO_EPS = 1e-8  # 이 값 이하는 "0"으로 취급 (부동소수점 오차로 완전청산이 부분청산으로 오인되는 것 방지)
 
 
@@ -590,6 +569,7 @@ def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict)
             "lever": ctx.get("lever"),
             "entry_px": float(ctx["avgPx"]) if ctx.get("avgPx") else None,
             "ord_id": f.get("ordId"),
+            "ts": f.get("ts"),
         }
 
         events: list[dict] = []
@@ -701,33 +681,37 @@ def format_fill_event(ev: dict) -> str:
         )
 
     if ev["type"] == "full_close":
-        record = find_close_record(inst_id)
         reason = classify_close_reason(inst_id, ev.get("ord_id"))
         reason_tag = f"  |  {_REASON_SHORT.get(reason, reason)}" if reason else ""
-        if record:
-            pnl_ratio = float(record.get("pnlRatio", 0)) * 100
-            open_px = fmt_num(record.get("openAvgPx", ev.get("entry_px") or 0))
-            close_px = fmt_num(record.get("closeAvgPx", ev["fill_px"]))
-            hold_ms = int(record.get("uTime", 0)) - int(record.get("cTime", 0))
-            hold_h = hold_ms / 1000 / 3600 if hold_ms > 0 else None
-            hold_line = f"보유 시간: 약 {hold_h:.1f}시간\n" if hold_h else ""
-            result_emoji = "✅" if float(record.get("pnl", 0)) >= 0 else "❌"
-            return (
-                f"🔴 <b>[전체청산]</b> {result_emoji}\n"
-                f"{inst_id}\n"
-                f"방향: {direction}  |  레버리지: {record.get('lever', lever)}배{reason_tag}\n"
-                f"진입가: {open_px}  →  청산가: {close_px}\n"
-                f"{hold_line}"
-                f"실현손익률: {pnl_ratio:+.2f}%"
-            )
-        # positions-history에 아직 반영 안 된 경우의 폴백 (다음 실행에서는 조회 가능해짐)
+
+        entry_px = ev.get("entry_px")
+        pnl_line = ""
+        result_emoji = ""
+        if entry_px:
+            sign = 1 if direction == "롱" else -1
+            price_return_pct = (ev["fill_px"] - entry_px) / entry_px * 100 * sign
+            try:
+                lev = float(ev.get("lever") or 1)
+            except (TypeError, ValueError):
+                lev = 1.0
+            pnl_ratio = price_return_pct * lev
+            result_emoji = " ✅" if pnl_ratio >= 0 else " ❌"
+            pnl_line = f"실현손익률: {pnl_ratio:+.2f}%\n"
+
+        hold_line = ""
+        hold_h = ev.get("hold_hours")
+        if hold_h is not None:
+            hold_line = f"보유 시간: 약 {hold_h:.1f}시간\n"
+
+        open_px = fmt_num(entry_px) if entry_px else "-"
         return (
-            f"🔴 <b>[전체청산]</b>\n"
+            f"🔴 <b>[전체청산]</b>{result_emoji}\n"
             f"{inst_id}\n"
             f"방향: {direction}  |  레버리지: {lever}배{reason_tag}\n"
-            f"체결가: {fmt_num(ev['fill_px'])}\n"
-            f"※ 실현손익 정산 데이터 반영 대기 중 (다음 갱신에서 계좌 정산 내역 직접 확인 권장)"
-        )
+            f"진입가: {open_px}  →  청산가: {fmt_num(ev['fill_px'])}\n"
+            f"{hold_line}"
+            f"{pnl_line}"
+        ).rstrip()
 
     return ""
 
@@ -797,6 +781,8 @@ def main():
     state = load_state()
     prev_positions = state.get("positions", {})
     thread_ids = state.get("thread_root_message_id", {})  # key -> 포지션 스레드의 첫 메시지 id
+    entry_ts = state.get("entry_ts", {})  # key -> 신규 진입 시각(ms) - 전체청산 때 보유시간 계산용
+    chapter = state.get("chapter_count", {})  # key -> 이 포지션 스레드에서 몇 번째 이벤트인지 ("비기 N장" 재미용)
     last_bill_id = state.get("last_bill_id")
     print(f"[state] initialized={state.get('initialized')}, last_bill_id={last_bill_id}, 저장된 포지션 수={len(prev_positions)}")
 
@@ -833,22 +819,37 @@ def main():
     for bill_id, events in fill_groups:
         for ev in events:
             key = ev["key"]
+            ch_n = chapter.get(key, 0) + 1
+            chapter[key] = ch_n
+            prefix = f"비기 {ch_n}장\n"
             if ev["type"] == "entry":
-                msg_id = tg_send(format_fill_event(ev))  # 신규 진입은 항상 새 스레드로 시작
+                if ev.get("ts"):
+                    entry_ts[key] = ev["ts"]
+                msg_id = tg_send(prefix + format_fill_event(ev))  # 신규 진입은 항상 새 스레드로 시작
                 thread_ids[key] = msg_id
             else:
-                tg_send(format_fill_event(ev), reply_to=thread_ids.get(key))
+                if ev["type"] == "full_close":
+                    start_ts = entry_ts.pop(key, None)
+                    if start_ts and ev.get("ts"):
+                        ev["hold_hours"] = (int(ev["ts"]) - int(start_ts)) / 1000 / 3600
+                tg_send(prefix + format_fill_event(ev), reply_to=thread_ids.get(key))
                 if ev["type"] == "full_close":
                     thread_ids.pop(key, None)
+                    chapter.pop(key, None)  # 포지션 종료 - 다음 진입은 다시 "비기 1장"부터
             total_events += 1
             time.sleep(TELEGRAM_SEND_DELAY)
         # 이 체결(및 여기서 파생된 이벤트 전부)까지는 처리 완료 - 체크포인트 전진 후 즉시 저장
         state["last_bill_id"] = bill_id
         state["thread_root_message_id"] = thread_ids
+        state["entry_ts"] = entry_ts
+        state["chapter_count"] = chapter
         save_state(state)
 
     for ev in lever_events:
-        tg_send(format_leverage_change(ev["prev"], ev["curr"]), reply_to=thread_ids.get(ev["key"]))
+        key = ev["key"]
+        ch_n = chapter.get(key, 0) + 1
+        chapter[key] = ch_n
+        tg_send(f"비기 {ch_n}장\n" + format_leverage_change(ev["prev"], ev["curr"]), reply_to=thread_ids.get(key))
         time.sleep(TELEGRAM_SEND_DELAY)
 
     # 요약은 변동(체결 이벤트 / 레버리지 변경 / 입출금으로 인한 시드 변화)이 있을 때만
@@ -876,6 +877,8 @@ def main():
     state["positions"] = curr_positions
     state["summary_message_id"] = summary_id
     state["thread_root_message_id"] = thread_ids
+    state["entry_ts"] = entry_ts
+    state["chapter_count"] = chapter
     state["last_base_eq"] = base_eq_now
     save_state(state)
     print(f"실행 완료: 체결 {len(fills)}건 -> 이벤트 {total_events + len(lever_events)}건 처리"
