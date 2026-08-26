@@ -610,19 +610,28 @@ def detect_leverage_changes(prev_positions: dict, curr_positions: dict) -> list[
 # ---------------------------------------------------------------------------
 # 메시지 포맷
 # ---------------------------------------------------------------------------
+def event_header(inst_id: str, direction: str, lever, reason: str | None = None) -> str:
+    """'SOL_롱_10배' 또는 청산 사유가 있으면 'BTC_롱_20배_SL' 형태의 짧은 헤더."""
+    base = f"{ticker(inst_id)}_{direction}_{lever}배"
+    if reason:
+        base += f"_{_REASON_SHORT.get(reason, reason)}"
+    return base
+
+
 def format_fill_event(ev: dict) -> str:
     inst_id = ev["instId"]
     direction = ev["direction"]
     lever = ev.get("lever") or "?"
+    header = event_header(inst_id, direction, lever)
 
     if ev["type"] == "entry":
         entry_margin = margin_line(inst_id, ev["size_after"], ev["fill_px"], lever, label="마진")
         margin_line_txt = entry_margin if entry_margin else qty_line(inst_id, ev["size_after"])
         return (
-            f"🟢 <b>[신규 진입]</b>\n"
-            f"{inst_id}\n"
-            f"방향: {direction}  |  레버리지: {lever}배\n"
+            f"{header}\n"
+            f"\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
+            f"\n"
             f"{margin_line_txt}"
         )
 
@@ -635,10 +644,10 @@ def format_fill_event(ev: dict) -> str:
         total_margin = margin_line(inst_id, ev["size_after"], ev.get("entry_px") or ev["fill_px"], lever, label="현재 총 마진")
         total_line = total_margin if total_margin else qty_line(inst_id, ev["size_after"], label="현재 총 수량")
         return (
-            f"🔵 <b>[추가매수]</b>\n"
-            f"{inst_id}\n"
-            f"방향: {direction}  |  레버리지: {lever}배\n"
+            f"{header}\n"
+            f"\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
+            f"\n"
             f"{added_line}  (기존 대비 +{add_pct:.1f}%)\n"
             f"{total_line}"
         )
@@ -647,22 +656,19 @@ def format_fill_event(ev: dict) -> str:
         closed = ev["size_before"] - ev["size_after"]
         closed_pct = closed / ev["size_before"] * 100 if ev["size_before"] else 0
         entry_px = ev.get("entry_px")
-        label = "부분청산"
         pnl_line = ""
         if entry_px:
             sign = 1 if direction == "롱" else -1
             price_return_pct = (ev["fill_px"] - entry_px) / entry_px * 100 * sign
-            label = "부분익절" if price_return_pct >= 0 else "부분손절"
-
             try:
                 lev = float(ev.get("lever") or 1)
             except (TypeError, ValueError):
                 lev = 1.0
             pnl_pct_leveraged = price_return_pct * lev
-            pnl_line = f"수익률: {pnl_pct_leveraged:+.2f}%\n"
+            pnl_line = f"수익률: {pnl_pct_leveraged:+.2f}%"
 
         reason = classify_close_reason(inst_id, ev.get("ord_id"))
-        reason_tag = f"  |  {_REASON_SHORT.get(reason, reason)}" if reason else ""
+        header_r = event_header(inst_id, direction, lever, reason)
 
         closed_margin = margin_line(inst_id, closed, entry_px, lever, label="청산 마진")
         closed_line = closed_margin if closed_margin else qty_line(inst_id, closed, label="청산 수량")
@@ -671,18 +677,18 @@ def format_fill_event(ev: dict) -> str:
         remain_line = remain if remain else qty_line(inst_id, ev["size_after"], label="잔여 수량")
 
         return (
-            f"🟡 <b>[{label}]</b>\n"
-            f"{inst_id}\n"
-            f"방향: {direction}  |  레버리지: {lever}배{reason_tag}\n"
-            f"{closed_line}  (보유 물량의 {closed_pct:.1f}%)\n"
+            f"{header_r}\n"
+            f"\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
+            f"\n"
+            f"{closed_line}  (보유 물량의 {closed_pct:.1f}%)\n"
+            f"{remain_line}\n"
+            f"\n"
             f"{pnl_line}"
-            f"{remain_line}"
-        )
+        ).rstrip()
 
     if ev["type"] == "full_close":
         reason = classify_close_reason(inst_id, ev.get("ord_id"))
-        reason_tag = f"  |  {_REASON_SHORT.get(reason, reason)}" if reason else ""
 
         entry_px = ev.get("entry_px")
         pnl_line = ""
@@ -703,12 +709,13 @@ def format_fill_event(ev: dict) -> str:
         if hold_h is not None:
             hold_line = f"보유 시간: 약 {hold_h:.1f}시간\n"
 
+        header_r = event_header(inst_id, direction, lever, reason)
         open_px = fmt_num(entry_px) if entry_px else "-"
         return (
-            f"🔴 <b>[전체청산]</b>{result_emoji}\n"
-            f"{inst_id}\n"
-            f"방향: {direction}  |  레버리지: {lever}배{reason_tag}\n"
+            f"{header_r}{result_emoji}\n"
+            f"\n"
             f"진입가: {open_px}  →  청산가: {fmt_num(ev['fill_px'])}\n"
+            f"\n"
             f"{hold_line}"
             f"{pnl_line}"
         ).rstrip()
@@ -718,15 +725,17 @@ def format_fill_event(ev: dict) -> str:
 
 def format_leverage_change(prev: dict, curr: dict) -> str:
     direction = direction_label(curr)
+    header = event_header(curr["instId"], direction, curr.get("lever"))
     margin_txt = margin_line(curr["instId"], curr["pos"], curr["avgPx"], curr.get("lever"), label="마진")
     if not margin_txt:
         margin_txt = qty_line(curr["instId"], curr["pos"])
     return (
-        f"⚙️ <b>[레버리지 변경]</b>\n"
-        f"{curr['instId']}\n"
-        f"방향: {direction}\n"
+        f"{header}\n"
+        f"\n"
+        f"평단가: {fmt_num(curr['avgPx'])}\n"
+        f"\n"
         f"레버리지: {prev.get('lever')}배 → {curr.get('lever')}배\n"
-        f"{margin_txt}  |  평단가: {fmt_num(curr['avgPx'])}"
+        f"{margin_txt}"
     )
 
 
@@ -782,7 +791,6 @@ def main():
     prev_positions = state.get("positions", {})
     thread_ids = state.get("thread_root_message_id", {})  # key -> 포지션 스레드의 첫 메시지 id
     entry_ts = state.get("entry_ts", {})  # key -> 신규 진입 시각(ms) - 전체청산 때 보유시간 계산용
-    chapter = state.get("chapter_count", {})  # key -> 이 포지션 스레드에서 몇 번째 이벤트인지 ("비기 N장" 재미용)
     last_bill_id = state.get("last_bill_id")
     print(f"[state] initialized={state.get('initialized')}, last_bill_id={last_bill_id}, 저장된 포지션 수={len(prev_positions)}")
 
@@ -815,42 +823,38 @@ def main():
     total_events = 0
 
     # 체결 단위로 처리 + 저장을 묶는다: 텔레그램 전송 도중 실패해도, 그때까지 확실히
+    # 레버리지 변경은 체결처럼 정확한 시각이 안 남아서 진짜 순서를 확신할 수 없지만,
+    # "배율 조정 후 매매"가 보통의 순서라 레버리지 변경을 먼저 보내는 쪽을 기본값으로 한다.
+    for ev in lever_events:
+        key = ev["key"]
+        tg_send(format_leverage_change(ev["prev"], ev["curr"]), reply_to=thread_ids.get(key))
+        time.sleep(TELEGRAM_SEND_DELAY)
+
+    # 체결 단위로 처리 + 저장을 묶는다: 텔레그램 전송 도중 실패해도, 그때까지 확실히
     # 보낸 체결까지는 체크포인트가 전진해있어서 다음 실행이 처음부터 다시 쏟아붓지 않는다.
     for bill_id, events in fill_groups:
         for ev in events:
             key = ev["key"]
-            ch_n = chapter.get(key, 0) + 1
-            chapter[key] = ch_n
-            prefix = f"비기 {ch_n}장\n"
             if ev["type"] == "entry":
                 if ev.get("ts"):
                     entry_ts[key] = ev["ts"]
-                msg_id = tg_send(prefix + format_fill_event(ev))  # 신규 진입은 항상 새 스레드로 시작
+                msg_id = tg_send(format_fill_event(ev))  # 신규 진입은 항상 새 스레드로 시작
                 thread_ids[key] = msg_id
             else:
                 if ev["type"] == "full_close":
                     start_ts = entry_ts.pop(key, None)
                     if start_ts and ev.get("ts"):
                         ev["hold_hours"] = (int(ev["ts"]) - int(start_ts)) / 1000 / 3600
-                tg_send(prefix + format_fill_event(ev), reply_to=thread_ids.get(key))
+                tg_send(format_fill_event(ev), reply_to=thread_ids.get(key))
                 if ev["type"] == "full_close":
                     thread_ids.pop(key, None)
-                    chapter.pop(key, None)  # 포지션 종료 - 다음 진입은 다시 "비기 1장"부터
             total_events += 1
             time.sleep(TELEGRAM_SEND_DELAY)
         # 이 체결(및 여기서 파생된 이벤트 전부)까지는 처리 완료 - 체크포인트 전진 후 즉시 저장
         state["last_bill_id"] = bill_id
         state["thread_root_message_id"] = thread_ids
         state["entry_ts"] = entry_ts
-        state["chapter_count"] = chapter
         save_state(state)
-
-    for ev in lever_events:
-        key = ev["key"]
-        ch_n = chapter.get(key, 0) + 1
-        chapter[key] = ch_n
-        tg_send(f"비기 {ch_n}장\n" + format_leverage_change(ev["prev"], ev["curr"]), reply_to=thread_ids.get(key))
-        time.sleep(TELEGRAM_SEND_DELAY)
 
     # 요약은 변동(체결 이벤트 / 레버리지 변경 / 입출금으로 인한 시드 변화)이 있을 때만
     # 새 메시지로 다시 보내고, 그걸 새로 고정한 뒤 이전 고정은 해제한다.
@@ -878,7 +882,6 @@ def main():
     state["summary_message_id"] = summary_id
     state["thread_root_message_id"] = thread_ids
     state["entry_ts"] = entry_ts
-    state["chapter_count"] = chapter
     state["last_base_eq"] = base_eq_now
     save_state(state)
     print(f"실행 완료: 체결 {len(fills)}건 -> 이벤트 {total_events + len(lever_events)}건 처리"
