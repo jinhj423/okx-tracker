@@ -859,10 +859,12 @@ def main():
     # 요약은 변동(체결 이벤트 / 레버리지 변경 / 입출금으로 인한 시드 변화)이 있을 때만
     # 새 메시지로 다시 보내고, 그걸 새로 고정한 뒤 이전 고정은 해제한다.
     # (입출금은 체결이 아니라서 total_events/lever_events로는 안 잡히므로, 시드 자체를
-    # 직전 실행과 비교해서 의미 있게(1 USD 이상) 바뀌었으면 그것도 갱신 사유로 취급한다.)
+    # 직전 실행과 비교해서 갱신 사유로 취급한다. 다만 펀딩비 정산도 시드를 미세하게
+    # 흔드는데 그건 갱신 사유로 치고 싶지 않아서, 펀딩비 수준(보통 몇 달러 이내)은
+    # 걸러지도록 임계값을 넉넉히(20 USD) 잡는다 - 진짜 입출금은 보통 이보다 훨씬 큼.)
     base_eq_now = compute_base_eq(curr_positions, total_eq)
     prev_base_eq = state.get("last_base_eq")
-    seed_changed = prev_base_eq is not None and abs(base_eq_now - prev_base_eq) > 1.0
+    seed_changed = prev_base_eq is not None and abs(base_eq_now - prev_base_eq) > 20.0
 
     summary_id = state.get("summary_message_id")
     if total_events or lever_events or seed_changed:
