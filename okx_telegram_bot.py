@@ -643,14 +643,23 @@ def detect_leverage_changes(prev_positions: dict, curr_positions: dict) -> list[
 # 메시지 포맷
 # ---------------------------------------------------------------------------
 def event_header(inst_id: str, direction: str, lever, reason: str | None = None) -> str:
-    """'SOL_📈_10x' 또는 청산 사유가 있으면 'BTC_📈_20x_SL' 형태의 짧은 헤더.
+    """'SOL 📈 10x' 또는 청산 사유가 있으면 'BTC 📈 20x SL' 형태의 짧은 헤더.
     방향은 텍스트(롱/숏) 대신 아이콘(📈/📉)으로 표시 - 요약 표와 같은 아이콘이라 일관됨.
     배율도 요약 표와 같은 표기(Nx)로 통일."""
     icon = "📈" if direction == "롱" else "📉"
-    base = f"{ticker(inst_id)}_{icon}_{lever}x"
+    base = f"{ticker(inst_id)} {icon} {lever}x"
     if reason:
-        base += f"_{_REASON_SHORT.get(reason, reason)}"
+        base += f" {_REASON_SHORT.get(reason, reason)}"
     return base
+
+
+_TYPE_LABEL = {
+    "entry": "매수",
+    "add": "추가매수",
+    "partial_close": "부분매도",
+    "full_close": "전량매도",
+    "leverage_change": "배율조정",
+}
 
 
 def format_fill_event(ev: dict) -> str:
@@ -663,7 +672,7 @@ def format_fill_event(ev: dict) -> str:
         entry_margin = margin_line(inst_id, ev["size_after"], ev["fill_px"], lever, label="마진")
         margin_line_txt = entry_margin if entry_margin else qty_line(inst_id, ev["size_after"])
         return (
-            f"🟢 {header}\n"
+            f"<b>[{_TYPE_LABEL['entry']}]</b> {header}\n"
             f"\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
             f"\n"
@@ -679,7 +688,7 @@ def format_fill_event(ev: dict) -> str:
         total_margin = margin_line(inst_id, ev["size_after"], ev.get("entry_px") or ev["fill_px"], lever, label="현재 총 마진")
         total_line = total_margin if total_margin else qty_line(inst_id, ev["size_after"], label="현재 총 수량")
         return (
-            f"🔵 {header}\n"
+            f"<b>[{_TYPE_LABEL['add']}]</b> {header}\n"
             f"\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
             f"\n"
@@ -712,7 +721,7 @@ def format_fill_event(ev: dict) -> str:
         remain_line = remain if remain else qty_line(inst_id, ev["size_after"], label="잔여 수량")
 
         return (
-            f"🟡 {header_r}\n"
+            f"<b>[{_TYPE_LABEL['partial_close']}]</b> {header_r}\n"
             f"\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
             f"\n"
@@ -727,7 +736,6 @@ def format_fill_event(ev: dict) -> str:
 
         entry_px = ev.get("entry_px")
         pnl_line = ""
-        result_emoji = ""
         if entry_px:
             sign = 1 if direction == "롱" else -1
             price_return_pct = (ev["fill_px"] - entry_px) / entry_px * 100 * sign
@@ -736,7 +744,6 @@ def format_fill_event(ev: dict) -> str:
             except (TypeError, ValueError):
                 lev = 1.0
             pnl_ratio = price_return_pct * lev
-            result_emoji = " ✅" if pnl_ratio >= 0 else " ❌"
             pnl_line = f"실현손익률: {pnl_ratio:+.2f}%\n"
 
         hold_line = ""
@@ -747,7 +754,7 @@ def format_fill_event(ev: dict) -> str:
         header_r = event_header(inst_id, direction, lever, reason)
         open_px = fmt_num(entry_px) if entry_px else "-"
         return (
-            f"🔴 {header_r}{result_emoji}\n"
+            f"<b>[{_TYPE_LABEL['full_close']}]</b> {header_r}\n"
             f"\n"
             f"진입가: {open_px}  →  청산가: {fmt_num(ev['fill_px'])}\n"
             f"\n"
@@ -760,16 +767,16 @@ def format_fill_event(ev: dict) -> str:
 
 def format_leverage_change(prev: dict, curr: dict) -> str:
     direction = direction_label(curr)
-    header = event_header(curr["instId"], direction, curr.get("lever"))
+    icon = "📈" if direction == "롱" else "📉"
+    header = f"{ticker(curr['instId'])} {icon} {prev.get('lever')}x → {curr.get('lever')}x"
     margin_txt = margin_line(curr["instId"], curr["pos"], curr["avgPx"], curr.get("lever"), label="마진")
     if not margin_txt:
         margin_txt = qty_line(curr["instId"], curr["pos"])
     return (
-        f"⚙️ {header}\n"
+        f"<b>[{_TYPE_LABEL['leverage_change']}]</b> {header}\n"
         f"\n"
         f"평단가: {fmt_num(curr['avgPx'])}\n"
         f"\n"
-        f"레버리지: {prev.get('lever')}x → {curr.get('lever')}x\n"
         f"{margin_txt}"
     )
 
