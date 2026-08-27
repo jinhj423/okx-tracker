@@ -611,8 +611,10 @@ def detect_leverage_changes(prev_positions: dict, curr_positions: dict) -> list[
 # 메시지 포맷
 # ---------------------------------------------------------------------------
 def event_header(inst_id: str, direction: str, lever, reason: str | None = None) -> str:
-    """'SOL_롱_10배' 또는 청산 사유가 있으면 'BTC_롱_20배_SL' 형태의 짧은 헤더."""
-    base = f"{ticker(inst_id)}_{direction}_{lever}배"
+    """'SOL_📈_10배' 또는 청산 사유가 있으면 'BTC_📈_20배_SL' 형태의 짧은 헤더.
+    방향은 텍스트(롱/숏) 대신 아이콘(📈/📉)으로 표시 - 요약 표와 같은 아이콘이라 일관됨."""
+    icon = "📈" if direction == "롱" else "📉"
+    base = f"{ticker(inst_id)}_{icon}_{lever}배"
     if reason:
         base += f"_{_REASON_SHORT.get(reason, reason)}"
     return base
@@ -628,7 +630,7 @@ def format_fill_event(ev: dict) -> str:
         entry_margin = margin_line(inst_id, ev["size_after"], ev["fill_px"], lever, label="마진")
         margin_line_txt = entry_margin if entry_margin else qty_line(inst_id, ev["size_after"])
         return (
-            f"{header}\n"
+            f"🟢 {header}\n"
             f"\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
             f"\n"
@@ -644,7 +646,7 @@ def format_fill_event(ev: dict) -> str:
         total_margin = margin_line(inst_id, ev["size_after"], ev.get("entry_px") or ev["fill_px"], lever, label="현재 총 마진")
         total_line = total_margin if total_margin else qty_line(inst_id, ev["size_after"], label="현재 총 수량")
         return (
-            f"{header}\n"
+            f"🔵 {header}\n"
             f"\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
             f"\n"
@@ -677,7 +679,7 @@ def format_fill_event(ev: dict) -> str:
         remain_line = remain if remain else qty_line(inst_id, ev["size_after"], label="잔여 수량")
 
         return (
-            f"{header_r}\n"
+            f"🟡 {header_r}\n"
             f"\n"
             f"체결가: {fmt_num(ev['fill_px'])}\n"
             f"\n"
@@ -712,7 +714,7 @@ def format_fill_event(ev: dict) -> str:
         header_r = event_header(inst_id, direction, lever, reason)
         open_px = fmt_num(entry_px) if entry_px else "-"
         return (
-            f"{header_r}{result_emoji}\n"
+            f"🔴 {header_r}{result_emoji}\n"
             f"\n"
             f"진입가: {open_px}  →  청산가: {fmt_num(ev['fill_px'])}\n"
             f"\n"
@@ -730,7 +732,7 @@ def format_leverage_change(prev: dict, curr: dict) -> str:
     if not margin_txt:
         margin_txt = qty_line(curr["instId"], curr["pos"])
     return (
-        f"{header}\n"
+        f"⚙️ {header}\n"
         f"\n"
         f"평단가: {fmt_num(curr['avgPx'])}\n"
         f"\n"
