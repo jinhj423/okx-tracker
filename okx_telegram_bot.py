@@ -535,11 +535,20 @@ def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict)
     체결 단위로 묶어서 반환하는 이유는, 텔레그램 전송 도중 실패하더라도 "이 체결까지는
     확실히 처리됨"을 체결 단위로 체크포인트에 반영할 수 있게 하기 위해서다.
     체결 하나하나를 다 처리하므로, 같은 폴링 구간 안에 여러 매매가 있어도
-    (심지어 서로 상쇄되어도) 전부 개별 이벤트로 남는다."""
-    # 원웨이(net) 모드는 부호 있는 값으로, 헤지 모드(long/short 버킷)는 0 이상 값으로 추적
-    ledger: dict[str, float] = {}
+    (심지어 서로 상쇄되어도) 전부 개별 이벤트로 남는다.
+
+    평단가(entry_px)는 반드시 이 함수 안에서 체결을 재생하며 직접 추적한다 - curr_positions
+    스냅샷은 이번 폴링 구간이 "전부 끝난 뒤"의 최종 상태 하나뿐이라, 같은 구간 안에서
+    청산 후 재진입처럼 같은 종목이 여러 번 바뀌면 그 스냅샷만으로는 "몇 번째 체결 시점의
+    평단가인지"를 구분할 수 없다 (전체청산 이벤트에 방금 재진입한 새 평단가가 잘못
+    붙어 수익률이 엉뚱하게 0%에 가깝게 나오는 등의 원인이 된다)."""
+    # 원웨이(net) 모드는 부호 있는 값으로, 헤지 모드(long/short 버킷)는 0 이상 값으로 추적.
+    # size와 함께 이 포지션의 평단가(avg_px)도 같이 들고 다닌다.
+    ledger: dict[str, dict] = {}
     for key, p in prev_positions.items():
-        ledger[key] = float(p["pos"]) if p["posSide"] == "net" else abs(float(p["pos"]))
+        size = float(p["pos"]) if p["posSide"] == "net" else abs(float(p["pos"]))
+        avg_px = float(p["avgPx"]) if p.get("avgPx") else None
+        ledger[key] = {"size": size, "avg_px": avg_px}
 
     groups: list[tuple[str, list[dict]]] = []
 
@@ -550,7 +559,9 @@ def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict)
         fill_sz = float(f["fillSz"])
         fill_px = float(f["fillPx"])
         key = f"{inst_id}|{pos_side}"
-        old_signed = ledger.get(key, 0.0)
+        entry = ledger.get(key, {"size": 0.0, "avg_px": None})
+        old_signed = entry["size"]
+        old_avg = entry["avg_px"]
 
         if pos_side == "short":
             delta = fill_sz if side == "sell" else -fill_sz
@@ -562,35 +573,56 @@ def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict)
             new_signed = max(new_signed, 0.0)  # 버킷 내에서는 0 미만으로 내려갈 수 없음
 
         ctx = curr_positions.get(key) or prev_positions.get(key) or {}
-        common = {
+        common_base = {
             "instId": inst_id,
             "key": key,
             "fill_px": fill_px,
             "lever": ctx.get("lever"),
-            "entry_px": float(ctx["avgPx"]) if ctx.get("avgPx") else None,
             "ord_id": f.get("ordId"),
             "ts": f.get("ts"),
         }
 
+        def _weighted_avg(old_sz, old_px, add_sz, add_px):
+            if old_sz <= _ZERO_EPS or old_px is None:
+                return add_px
+            return (old_sz * old_px + add_sz * add_px) / (old_sz + add_sz)
+
         events: list[dict] = []
         if pos_side in ("long", "short"):
             direction = "롱" if pos_side == "long" else "숏"
+            if new_signed > old_signed:  # 증가(진입/추가) - 평단가 갱신
+                reported_avg = _weighted_avg(old_signed, old_avg, fill_sz, fill_px)
+                ledger_avg = reported_avg
+            else:  # 감소(청산) - 보고용 평단가는 원래 값 그대로(청산으로 원가가 바뀌지 않음).
+                # 원장에 남길 값만, 완전히 0이 되면 다음 신규 진입을 위해 리셋한다.
+                reported_avg = old_avg
+                ledger_avg = old_avg if new_signed > _ZERO_EPS else None
+            common = {**common_base, "entry_px": reported_avg}
             events.extend(_classify(old_signed, new_signed, direction, common))
+            ledger[key] = {"size": new_signed, "avg_px": ledger_avg}
         else:
             if abs(old_signed) > _ZERO_EPS and abs(new_signed) > _ZERO_EPS and (old_signed > 0) != (new_signed > 0):
                 # 한 체결 안에서 방향이 뒤집힌 경우 (반대매매 초과 주문) - 전체청산 + 신규진입으로 분리
                 old_dir = "롱" if old_signed > 0 else "숏"
                 new_dir = "롱" if new_signed > 0 else "숏"
-                events.append({**common, "type": "full_close", "direction": old_dir,
+                events.append({**common_base, "entry_px": old_avg, "type": "full_close", "direction": old_dir,
                                "size_before": abs(old_signed), "size_after": 0.0})
-                events.append({**common, "type": "entry", "direction": new_dir,
+                events.append({**common_base, "entry_px": fill_px, "type": "entry", "direction": new_dir,
                                "size_before": 0.0, "size_after": abs(new_signed)})
+                ledger_avg = fill_px  # 새로 시작된 반대 방향 포지션의 평단가
             else:
                 ref = new_signed if abs(new_signed) > _ZERO_EPS else old_signed
                 direction = "롱" if ref > 0 else "숏"
+                if abs(new_signed) > abs(old_signed):  # 증가
+                    reported_avg = _weighted_avg(abs(old_signed), old_avg, fill_sz, fill_px)
+                    ledger_avg = reported_avg
+                else:  # 감소
+                    reported_avg = old_avg
+                    ledger_avg = old_avg if abs(new_signed) > _ZERO_EPS else None
+                common = {**common_base, "entry_px": reported_avg}
                 events.extend(_classify(abs(old_signed), abs(new_signed), direction, common))
+            ledger[key] = {"size": new_signed, "avg_px": ledger_avg}
 
-        ledger[key] = new_signed
         groups.append((f["billId"], events))
 
     return groups
@@ -611,10 +643,11 @@ def detect_leverage_changes(prev_positions: dict, curr_positions: dict) -> list[
 # 메시지 포맷
 # ---------------------------------------------------------------------------
 def event_header(inst_id: str, direction: str, lever, reason: str | None = None) -> str:
-    """'SOL_📈_10배' 또는 청산 사유가 있으면 'BTC_📈_20배_SL' 형태의 짧은 헤더.
-    방향은 텍스트(롱/숏) 대신 아이콘(📈/📉)으로 표시 - 요약 표와 같은 아이콘이라 일관됨."""
+    """'SOL_📈_10x' 또는 청산 사유가 있으면 'BTC_📈_20x_SL' 형태의 짧은 헤더.
+    방향은 텍스트(롱/숏) 대신 아이콘(📈/📉)으로 표시 - 요약 표와 같은 아이콘이라 일관됨.
+    배율도 요약 표와 같은 표기(Nx)로 통일."""
     icon = "📈" if direction == "롱" else "📉"
-    base = f"{ticker(inst_id)}_{icon}_{lever}배"
+    base = f"{ticker(inst_id)}_{icon}_{lever}x"
     if reason:
         base += f"_{_REASON_SHORT.get(reason, reason)}"
     return base
@@ -736,7 +769,7 @@ def format_leverage_change(prev: dict, curr: dict) -> str:
         f"\n"
         f"평단가: {fmt_num(curr['avgPx'])}\n"
         f"\n"
-        f"레버리지: {prev.get('lever')}배 → {curr.get('lever')}배\n"
+        f"레버리지: {prev.get('lever')}x → {curr.get('lever')}x\n"
         f"{margin_txt}"
     )
 
@@ -768,18 +801,16 @@ def format_summary(curr_positions: dict, total_eq: float = 0.0) -> str:
     # 종목마다 글자 수가 달라서, 열 너비를 데이터에 맞춰 자동으로 맞춘다
     # (참고: <pre>/<code>는 텔레그램이 "복사" 버튼을 자동으로 붙이는 코드블록 UI라
     #  일부러 안 쓰고, 일반 텍스트 + 공백 패딩으로 정렬한다. 고정폭 글꼴이 아니라서
-    #  <pre>만큼 완벽히 맞진 않지만 슬래시로 나열하던 것보단 훨씬 정돈되어 보인다.)
+    #  <pre>만큼 완벽히 맞진 않지만 슬래시로 나열하던 것보단 훨씬 정돈되어 보인다.
+    #  수익률/비중은 같은 줄에 붙이면 모바일 화면 폭에서 줄바꿈이 씹혀 지저분해지므로
+    #  아예 다음 줄로 내리고 2칸 들여쓴다.)
     tick_w = max(len(r[1]) for r in rows) + 1
     lev_w = max(len(r[2]) for r in rows) + 1
-    px_w = max(len(r[3]) for r in rows) + 1
-    pnl_w = max(len(r[4]) for r in rows) + 1
 
     lines = ["📌 <b>진행중인 포지션</b> 📌", seed_line, ""]
     for emoji, tk, lv, px, pnl, weight in rows:
-        lines.append(
-            f"{emoji} <b>{tk.ljust(tick_w)}</b> {lv.ljust(lev_w)} {px.rjust(px_w)}  "
-            f"{pnl.rjust(pnl_w)}  (비중 {weight})"
-        )
+        lines.append(f"{emoji} <b>{tk.ljust(tick_w)}</b> {lv.ljust(lev_w)} {px}")
+        lines.append(f"  {pnl}  (비중 {weight})")
     lines.append("")
     lines.append(f"<i>갱신: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</i>")
     return "\n".join(lines)
