@@ -817,7 +817,7 @@ def format_summary(curr_positions: dict, total_eq: float = 0.0) -> str:
     lines = ["📌 <b>진행중인 포지션</b> 📌", seed_line, ""]
     for emoji, tk, lv, px, pnl, weight in rows:
         lines.append(f"{emoji} <b>{tk.ljust(tick_w)}</b> {lv.ljust(lev_w)} {px}")
-        lines.append(f"  {pnl}  (비중 {weight})")
+        lines.append(f"     {pnl}  (비중 {weight})")
     lines.append("")
     lines.append(f"<i>갱신: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</i>")
     return "\n".join(lines)
