@@ -39,6 +39,7 @@ jobs:
           OKX_API_PASSPHRASE: ${{ secrets.OKX_API_PASSPHRASE }}
           OKX_SIMULATED: ${{ vars.OKX_SIMULATED || '0' }}
           OKX_INST_TYPES: ${{ vars.OKX_INST_TYPES || 'SWAP' }}
+          DEBUG_FILLS: ${{ vars.DEBUG_FILLS || '0' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_TOPIC_ID: ${{ secrets.TELEGRAM_TOPIC_ID }}
