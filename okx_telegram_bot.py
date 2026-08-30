@@ -207,7 +207,12 @@ def get_new_fills(last_bill_id: str | None) -> list[dict]:
             print(f"체결 내역 조회 실패 ({inst_type}): {e}")
             fills = []
         new_ones = [f for f in fills if int(f["billId"]) > last_bid]
-        print(f"[fills] {inst_type}: 조회 {len(fills)}건 중 신규 {len(new_ones)}건 (체크포인트={last_bid})")
+        if fills:
+            bids = [int(x["billId"]) for x in fills]
+            print(f"[fills] {inst_type}: 조회 {len(fills)}건 중 신규 {len(new_ones)}건 "
+                  f"(체크포인트={last_bid}, 조회된 billId 범위={min(bids)}~{max(bids)})")
+        else:
+            print(f"[fills] {inst_type}: 조회 0건 (체크포인트={last_bid})")
         all_fills.extend(new_ones)
     all_fills.sort(key=lambda f: int(f["billId"]))
     return all_fills
@@ -832,7 +837,8 @@ def main():
     thread_ids = state.get("thread_root_message_id", {})  # key -> 포지션 스레드의 첫 메시지 id
     entry_ts = state.get("entry_ts", {})  # key -> 신규 진입 시각(ms) - 전체청산 때 보유시간 계산용
     last_bill_id = state.get("last_bill_id")
-    print(f"[state] initialized={state.get('initialized')}, last_bill_id={last_bill_id}, 저장된 포지션 수={len(prev_positions)}")
+    print(f"[state] initialized={state.get('initialized')}, last_bill_id={last_bill_id}, "
+          f"저장된 포지션 수={len(prev_positions)}, 감시 중인 상품종류={INST_TYPES}")
 
     curr_positions_list = get_positions()
     curr_positions = build_snapshot_map(curr_positions_list)
