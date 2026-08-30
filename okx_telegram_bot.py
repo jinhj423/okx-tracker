@@ -870,6 +870,21 @@ def main():
 
     # last_bill_id가 비어있어도(초기화 당시 조회 실패 등) get_new_fills가 0으로 간주해
     # 최근 체결을 전부 "새 것"으로 처리하므로, 별도 분기 없이 그대로 호출하면 된다.
+    # --- 임시 진단: OKX가 실제로 뭘 돌려주는지 원본 응답을 텔레그램으로 직접 보낸다 ---
+    if os.environ.get("DEBUG_FILLS") == "1":
+        import json as _json
+        try:
+            raw = get_recent_fills(INST_TYPES[0], limit=5)
+            slim = [{"billId": r.get("billId"), "instId": r.get("instId"),
+                     "posSide": r.get("posSide"), "side": r.get("side"),
+                     "fillSz": r.get("fillSz"), "fillPx": r.get("fillPx"),
+                     "ts": r.get("ts")} for r in raw[:5]]
+            dbg = (f"🔧 <b>[진단]</b> 저장된 체크포인트: <code>{last_bill_id}</code>\n\n"
+                   f"OKX /trade/fills 최근 5건:\n<code>{_json.dumps(slim, ensure_ascii=False, indent=1)}</code>")
+        except Exception as e:
+            dbg = f"🔧 [진단] get_recent_fills 예외: {e}"
+        tg_send(dbg)
+
     fills = get_new_fills(last_bill_id)
     fills = merge_fills(fills)  # 1분 이내 연속 체결은 하나로 합쳐서 이벤트를 만든다
     fill_groups = process_fills(fills, prev_positions, curr_positions)
