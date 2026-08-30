@@ -4,7 +4,7 @@
 OKX 선물 포지션 <-> 텔레그램 특정 토픽 연동 봇
 
 - "매매할 때마다 빠짐없이 기록되는 것"을 최우선 목표로 삼는다. 이를 위해 포지션
-  스냅샷의 순간적인 증감 비교가 아니라, OKX의 체결 내역(fills-history)을 직전
+  스냅샷의 순간적인 증감 비교가 아니라, OKX의 최근 체결 내역(/trade/fills)을 직전
   체크포인트 이후로 전부 가져와 체결 하나하나를 순서대로 재생(replay)하며 이벤트를
   만든다. 같은 폴링 구간 안에 여러 번 매매해도, 서로 상쇄되는 매매를 해도 전부
   개별 이벤트로 남는다.
@@ -179,11 +179,19 @@ def classify_close_reason(inst_id: str, ord_id: str | None) -> str | None:
 
 
 def get_fills_history(inst_type: str, before: str | None = None, limit: int = 100) -> list[dict]:
-    """체결(거래 실행) 내역. before=billId를 주면 그 billId보다 새로운 체결만 반환."""
+    """체결(거래 실행) '이력' 조회 - /trade/fills-history.
+    이 엔드포인트는 이름 그대로 과거 이력 조회용이라, 방금 일어난 체결이 반영되기까지
+    지연이 있을 수 있다. 감지 용도로는 get_recent_fills(아래, /trade/fills)를 쓴다."""
     params = {"instType": inst_type, "limit": str(limit)}
     if before:
         params["before"] = before
     return okx_request("GET", "/api/v5/trade/fills-history", params)
+
+
+def get_recent_fills(inst_type: str, limit: int = 100) -> list[dict]:
+    """최근 체결 조회 - /trade/fills. fills-history와 달리 방금 일어난 체결도
+    거의 실시간으로 반영되는 엔드포인트라, 신규 체결 감지는 이쪽을 쓴다."""
+    return okx_request("GET", "/api/v5/trade/fills", {"instType": inst_type, "limit": str(limit)})
 
 
 def get_new_fills(last_bill_id: str | None) -> list[dict]:
@@ -202,7 +210,7 @@ def get_new_fills(last_bill_id: str | None) -> list[dict]:
     all_fills = []
     for inst_type in INST_TYPES:
         try:
-            fills = get_fills_history(inst_type, limit=30)  # before 없이 최신순 그대로
+            fills = get_recent_fills(inst_type, limit=30)  # 실시간 반영되는 엔드포인트
         except Exception as e:
             print(f"체결 내역 조회 실패 ({inst_type}): {e}")
             fills = []
@@ -223,7 +231,7 @@ def get_latest_bill_id() -> str | None:
     latest = None
     for inst_type in INST_TYPES:
         try:
-            fills = get_fills_history(inst_type, limit=1)
+            fills = get_recent_fills(inst_type, limit=1)
         except Exception:
             fills = []
         if fills:
