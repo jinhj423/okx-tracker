@@ -586,6 +586,18 @@ def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict)
             new_signed = max(new_signed, 0.0)  # 버킷 내에서는 0 미만으로 내려갈 수 없음
 
         ctx = curr_positions.get(key) or prev_positions.get(key) or {}
+        # 실제 포지션의 증거금(마진)을 OKX가 준 값 그대로 싣는다. 계약수x가격/레버리지로
+        # 직접 계산하면, 배율조정 후 추가매수처럼 레버리지가 바뀐 경우 분모가 달라져
+        # 마진이 뻥튀기되는 문제가 있어서, 거래소가 확정한 imr(격리모드면 margin)을 쓴다.
+        actual_margin = None
+        cur_ctx = curr_positions.get(key)
+        if cur_ctx:
+            mv = cur_ctx.get("imr") or cur_ctx.get("margin")
+            if mv:
+                try:
+                    actual_margin = float(mv)
+                except (TypeError, ValueError):
+                    actual_margin = None
         common_base = {
             "instId": inst_id,
             "key": key,
@@ -593,6 +605,7 @@ def process_fills(fills: list[dict], prev_positions: dict, curr_positions: dict)
             "lever": ctx.get("lever"),
             "ord_id": f.get("ordId"),
             "ts": f.get("ts"),
+            "actual_margin": actual_margin,  # 현재 이 포지션에 실제로 들어가 있는 총 마진
         }
 
         def _weighted_avg(old_sz, old_px, add_sz, add_px):
@@ -695,11 +708,17 @@ def format_fill_event(ev: dict) -> str:
     if ev["type"] == "add":
         added = ev["size_after"] - ev["size_before"]
         add_pct = added / ev["size_before"] * 100 if ev["size_before"] else 0
-        # "추가로 투입한 마진"은 이번 체결가 기준, "총 마진"은 갱신된 평단가(entry_px) 기준
+        # "추가로 투입한 마진"은 이번 체결분(체결가x수량/레버리지)으로 계산.
         added_margin = margin_line(inst_id, added, ev["fill_px"], lever, label="추가 마진")
         added_line = added_margin if added_margin else qty_line(inst_id, added, label="추가 수량")
-        total_margin = margin_line(inst_id, ev["size_after"], ev.get("entry_px") or ev["fill_px"], lever, label="현재 총 마진")
-        total_line = total_margin if total_margin else qty_line(inst_id, ev["size_after"], label="현재 총 수량")
+        # "현재 총 마진"은 계산으로 추정하지 않고 OKX가 확정한 실제 마진 값을 그대로 쓴다
+        # (배율조정 후 추가매수 시 계산식으로는 뻥튀기되는 문제 때문).
+        quote_ccy = inst_id.split("-")[1] if "-" in inst_id else ""
+        if ev.get("actual_margin") is not None:
+            total_line = f"현재 총 마진: {fmt_num(ev['actual_margin'])} {quote_ccy}"
+        else:
+            total_margin = margin_line(inst_id, ev["size_after"], ev.get("entry_px") or ev["fill_px"], lever, label="현재 총 마진")
+            total_line = total_margin if total_margin else qty_line(inst_id, ev["size_after"], label="현재 총 수량")
         return (
             f"<b>[{_TYPE_LABEL['add']}]</b> {header}\n"
             f"\n"
