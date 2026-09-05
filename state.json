@@ -24,12 +24,12 @@
       "gammaBS": "",
       "gammaPA": "",
       "hedgedPos": "",
-      "idxPx": "101.91",
+      "idxPx": "101.9",
       "imr": "148.89007999999998",
       "instId": "SOL-USDT-SWAP",
       "instType": "SWAP",
       "interest": "",
-      "last": "101.85",
+      "last": "101.84",
       "lever": "10",
       "liab": "",
       "liabCcy": "",
@@ -63,9 +63,9 @@
       "tradeId": "1607318725",
       "uTime": "1788572818569",
       "upl": "2.631599999999892",
-      "uplLastPx": "2.4854000000000247",
+      "uplLastPx": "2.631599999999892",
       "uplRatio": "0.0176435992942559",
-      "uplRatioLastPx": "0.0166633993334642",
+      "uplRatioLastPx": "0.0176435992942559",
       "usdPx": "1.00017",
       "vegaBS": "",
       "vegaPA": ""
@@ -77,7 +77,7 @@
     "SOL-USDT-SWAP|short": 9357
   },
   "last_bill_id": "3894676967115378689",
-  "last_base_eq": 1994.5054281223315,
+  "last_base_eq": 1994.4854601466059,
   "entry_ts": {
     "DOGE-USDT-SWAP|long": "1787932870483",
     "SOL-USDT-SWAP|short": "1788572818569"
