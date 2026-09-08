@@ -801,9 +801,20 @@ def format_leverage_change(prev: dict, curr: dict) -> str:
     direction = direction_label(curr)
     icon = "📈" if direction == "롱" else "📉"
     header = f"{ticker(curr['instId'])} {icon} {prev.get('lever')}x → {curr.get('lever')}x"
-    margin_txt = margin_line(curr["instId"], curr["pos"], curr["avgPx"], curr.get("lever"), label="마진")
+    # 마진은 계산식(수량x가격/레버리지)으로 추정하지 않고 OKX가 확정한 실제 값을 쓴다.
+    # 크로스 마진에서는 배율을 올리면 필요 증거금이 줄어드는데, 계산식으로는 그 동작을
+    # 제대로 반영 못 해 뻥튀기/역방향으로 보이는 문제가 있어서다.
+    quote_ccy = curr["instId"].split("-")[1] if "-" in curr["instId"] else ""
+    mv = curr.get("imr") or curr.get("margin")
+    margin_txt = None
+    if mv:
+        try:
+            margin_txt = f"마진: {fmt_num(float(mv))} {quote_ccy}"
+        except (TypeError, ValueError):
+            margin_txt = None
     if not margin_txt:
-        margin_txt = qty_line(curr["instId"], curr["pos"])
+        margin_txt = margin_line(curr["instId"], curr["pos"], curr["avgPx"], curr.get("lever"), label="마진") \
+            or qty_line(curr["instId"], curr["pos"])
     return (
         f"<b>[{_TYPE_LABEL['leverage_change']}]</b> {header}\n"
         f"\n"
@@ -829,13 +840,20 @@ def format_summary(curr_positions: dict, total_eq: float = 0.0) -> str:
         return f"📌 <b>진행중인 포지션</b> 📌\n{seed_line}\n\n보유 중인 포지션 없음"
 
     rows = []
+    total_weight = 0.0
     for p in curr_positions.values():
         emoji = "📈" if direction_label(p) == "롱" else "📉"
         pnl_pct = float(p.get("uplRatio", 0) or 0) * 100
         # 이 포지션에 물려있는 증거금(imr, 격리모드면 margin) / 원금 성격의 계좌 = 계좌 대비 비중
         margin_used = float(p.get("imr") or p.get("margin") or 0)
-        weight = f"{margin_used / base_eq * 100:.1f}%" if base_eq > 0 else "-"
+        weight_val = margin_used / base_eq * 100 if base_eq > 0 else 0
+        total_weight += weight_val
+        weight = f"{weight_val:.1f}%" if base_eq > 0 else "-"
         rows.append((emoji, ticker(p["instId"]), f"{p['lever']}x", fmt_num(p["avgPx"]), f"{pnl_pct:+.2f}%", weight))
+
+    # 시드 줄 옆에 전체 포지션 비중의 단순 합("총 사용")을 같이 표시한다
+    if base_eq > 0:
+        seed_line = f"시드: {fmt_num(base_eq)} USD  |  총 사용: {total_weight:.1f}%"
 
     # 종목마다 글자 수가 달라서, 열 너비를 데이터에 맞춰 자동으로 맞춘다
     # (참고: <pre>/<code>는 텔레그램이 "복사" 버튼을 자동으로 붙이는 코드블록 UI라
