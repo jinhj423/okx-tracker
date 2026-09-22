@@ -29,7 +29,7 @@
       "instId": "MASK-USDT-SWAP",
       "instType": "SWAP",
       "interest": "",
-      "last": "0.4908",
+      "last": "0.4909",
       "lever": "3",
       "liab": "",
       "liabCcy": "",
@@ -42,7 +42,7 @@
       "mgnRatio": "79.24776714778862",
       "mmr": "9.244788",
       "nonSettleAvgPx": "",
-      "notionalUsd": "462.2625119700001",
+      "notionalUsd": "462.25326718200006",
       "optVal": "",
       "pendingCloseOrdLiabVal": "",
       "pnl": "0",
@@ -63,10 +63,10 @@
       "tradeId": "188164964",
       "uTime": "1790092801591",
       "upl": "13.093800000000023",
-      "uplLastPx": "13.188000000000011",
+      "uplLastPx": "13.282200000000001",
       "uplRatio": "0.0874580536912752",
-      "uplRatioLastPx": "0.088087248322148",
-      "usdPx": "1.00005",
+      "uplRatioLastPx": "0.0887164429530201",
+      "usdPx": "1.00003",
       "vegaBS": "",
       "vegaPA": ""
     }
@@ -78,7 +78,7 @@
     "MASK-USDT-SWAP|long": 13518
   },
   "last_bill_id": "3945562856083083266",
-  "last_base_eq": 737.8882741498836,
+  "last_base_eq": 737.873255259345,
   "entry_ts": {
     "DOGE-USDT-SWAP|long": "1787932870483",
     "SUI-USDT-SWAP|long": "1789887681084",
