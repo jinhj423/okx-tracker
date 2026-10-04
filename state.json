@@ -42,7 +42,7 @@
       "mgnRatio": "22.934945044736082",
       "mmr": "62.469224999999994",
       "nonSettleAvgPx": "",
-      "notionalUsd": "6245.7980539499995",
+      "notionalUsd": "6245.735584724999",
       "optVal": "",
       "pendingCloseOrdLiabVal": "",
       "pnl": "0",
@@ -66,7 +66,7 @@
       "uplLastPx": "-83.4439000000029",
       "uplRatio": "-0.1977229153750154",
       "uplRatioLastPx": "-0.1977229153750154",
-      "usdPx": "0.99982",
+      "usdPx": "0.99981",
       "vegaBS": "",
       "vegaPA": ""
     }
@@ -78,7 +78,7 @@
     "HYPE-USDT-SWAP|long": 16441
   },
   "last_bill_id": "3979856592749121537",
-  "last_base_eq": 1587.5377688425624,
+  "last_base_eq": 1587.5227251960175,
   "entry_ts": {
     "DOGE-USDT-SWAP|long": "1787932870483",
     "TRUMP-USDT-SWAP|long": "1790993599100",
