@@ -24,7 +24,7 @@
       "gammaBS": "",
       "gammaPA": "",
       "hedgedPos": "",
-      "idxPx": "84817.3",
+      "idxPx": "84816.4",
       "imr": "146.67199499999998",
       "instId": "BTC-USDT-SWAP",
       "instType": "SWAP",
@@ -42,7 +42,7 @@
       "mgnRatio": "21.694290609546826",
       "mmr": "23.4675192",
       "nonSettleAvgPx": "",
-      "notionalUsd": "5865.999768029999",
+      "notionalUsd": "5865.941099231999",
       "optVal": "",
       "pendingCloseOrdLiabVal": "",
       "pnl": "0",
@@ -66,7 +66,7 @@
       "uplLastPx": "-7.9926",
       "uplRatio": "-0.0544188840595083",
       "uplRatioLastPx": "-0.0544188840595083",
-      "usdPx": "0.99985",
+      "usdPx": "0.99984",
       "vegaBS": "",
       "vegaPA": ""
     },
@@ -111,7 +111,7 @@
       "mgnRatio": "21.694290609546826",
       "mmr": "40.52563",
       "nonSettleAvgPx": "",
-      "notionalUsd": "4051.95511555",
+      "notionalUsd": "4051.9145899199993",
       "optVal": "",
       "pendingCloseOrdLiabVal": "",
       "pnl": "0",
@@ -135,7 +135,7 @@
       "uplLastPx": "-60.88260000000382",
       "uplRatio": "-0.1480087642340611",
       "uplRatioLastPx": "-0.1480087642340611",
-      "usdPx": "0.99985",
+      "usdPx": "0.99984",
       "vegaBS": "",
       "vegaPA": ""
     }
@@ -148,7 +148,7 @@
     "BTC-USDT-SWAP|long": 16611
   },
   "last_bill_id": "3978442337529286667",
-  "last_base_eq": 1564.5344306169075,
+  "last_base_eq": 1564.5194717807758,
   "entry_ts": {
     "DOGE-USDT-SWAP|long": "1787932870483",
     "TRUMP-USDT-SWAP|long": "1790993599100",
