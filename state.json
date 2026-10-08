@@ -38,7 +38,7 @@
       "gammaBS": "",
       "gammaPA": "",
       "hedgedPos": "",
-      "idxPx": "1.859",
+      "idxPx": "1.86",
       "imr": "531.594105",
       "instId": "TRUMP-USDT-SWAP",
       "instType": "SWAP",
@@ -91,7 +91,7 @@
     "TRUMP-USDT-SWAP|long": 17032
   },
   "last_bill_id": "3987481794505003011",
-  "last_base_eq": 1440.9000413425426,
+  "last_base_eq": 1440.9076252066611,
   "entry_ts": {
     "DOGE-USDT-SWAP|long": "1787932870483",
     "TRUMP-USDT-SWAP|long": "1791207790301"
