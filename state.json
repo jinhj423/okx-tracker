@@ -38,7 +38,7 @@
       "gammaBS": "",
       "gammaPA": "",
       "hedgedPos": "",
-      "idxPx": "1.846",
+      "idxPx": "1.845",
       "imr": "527.87266",
       "instId": "TRUMP-USDT-SWAP",
       "instType": "SWAP",
@@ -56,7 +56,7 @@
       "mgnRatio": "6.169936007914731",
       "mmr": "105.574532",
       "nonSettleAvgPx": "",
-      "notionalUsd": "10550.168557292",
+      "notionalUsd": "10549.957408228",
       "optVal": "",
       "pendingCloseOrdLiabVal": "",
       "pnl": "0",
@@ -80,7 +80,7 @@
       "uplLastPx": "-757.4734000000009",
       "uplRatio": "-1.3388922911793366",
       "uplRatioLastPx": "-1.3388922911793366",
-      "usdPx": "0.99931",
+      "usdPx": "0.99929",
       "vegaBS": "",
       "vegaPA": ""
     }
@@ -91,7 +91,7 @@
     "TRUMP-USDT-SWAP|long": 17032
   },
   "last_bill_id": "3987481794505003011",
-  "last_base_eq": 1440.958981147661,
+  "last_base_eq": 1440.9453019974244,
   "entry_ts": {
     "DOGE-USDT-SWAP|long": "1787932870483",
     "TRUMP-USDT-SWAP|long": "1791207790301"
