@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OKX 선물 포지션 <-> 텔레그램 특정 토픽 연동 봇
+OKX 선물 포지션 <-> 텔레그램 연동 봇 (자동 매매일지)
+
+- 개인 채널(토픽 없음) 또는 그룹 토픽 모두 지원. TELEGRAM_TOPIC_ID를 비우면 채널로 보낸다.
+- 청산 메시지에 실현손익(USDT, 수수료·펀딩비 차감 후)과 월/총 수익금을 붙인다.
+  월 수익금은 매월 1일 09:00 KST에 리셋, 총 수익금은 리셋 없음.
+- 매일 09:00 KST 일간 리포트, 월요일 주간 리포트, 1일 월간 리포트.
+  (손익 원장 코드는 "손익 원장" 섹션 참고)
 
 - "매매할 때마다 빠짐없이 기록되는 것"을 최우선 목표로 삼는다. 이를 위해 포지션
   스냅샷의 순간적인 증감 비교가 아니라, OKX의 최근 체결 내역(/trade/fills)을 직전
@@ -47,7 +53,8 @@ OKX_SIMULATED = os.environ.get("OKX_SIMULATED", "0")  # "1"이면 데모 트레�
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
-TELEGRAM_TOPIC_ID = int(os.environ["TELEGRAM_TOPIC_ID"])
+# 개인 채널에는 토픽이 없으므로 선택값. 비워두면 채널/일반 채팅에 그대로 보낸다.
+TELEGRAM_TOPIC_ID = int(os.environ.get("TELEGRAM_TOPIC_ID") or 0) or None
 
 # 감시할 상품 종류. 선물(swap)만 본다면 SWAP만 두면 된다. 무기한/현물 등 필요에 맞게 조정.
 INST_TYPES = os.environ.get("OKX_INST_TYPES", "SWAP").split(",")
@@ -410,10 +417,11 @@ def tg_call(method: str, payload: dict, max_retries: int = 5) -> dict:
 def tg_send(text: str, reply_to: int | None = None) -> int:
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "message_thread_id": TELEGRAM_TOPIC_ID,
         "text": text,
         "parse_mode": "HTML",
     }
+    if TELEGRAM_TOPIC_ID:
+        payload["message_thread_id"] = TELEGRAM_TOPIC_ID
     if reply_to:
         payload["reply_to_message_id"] = reply_to
     result = tg_call("sendMessage", payload)
@@ -760,7 +768,8 @@ def format_fill_event(ev: dict) -> str:
             f"{closed_line}  (보유 물량의 {closed_pct:.1f}%)\n"
             f"{remain_line}\n"
             f"\n"
-            f"{pnl_line}"
+            f"{pnl_line}\n"
+            f"{pnl_tail(ev)}"
         ).rstrip()
 
     if ev["type"] == "full_close":
@@ -792,6 +801,7 @@ def format_fill_event(ev: dict) -> str:
             f"\n"
             f"{hold_line}"
             f"{pnl_line}"
+            f"{pnl_tail(ev)}"
         ).rstrip()
 
     return ""
@@ -874,6 +884,397 @@ def format_summary(curr_positions: dict, total_eq: float = 0.0) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 손익 원장 (자동 매매일지) - positions-history의 realizedPnl 기준
+# ---------------------------------------------------------------------------
+# realizedPnl = pnl + fee + fundingFee + liqPenalty + settledPnl (OKX 공식 문서)
+#  -> 수수료·펀딩비까지 차감된 순손익이라 그대로 누적한다.
+# 부분청산은 positions-history에서 별도 행이 아니라 "같은 포지션 행이 갱신"되는 구조라,
+# 직전에 본 누적 realizedPnl과의 차이만큼만 더해서 이중 집계를 막는다.
+# posId는 전체청산 후 30일간 재사용될 수 있어 posId+cTime을 키로 쓴다.
+#
+# 기간 경계: 09:00 KST = 00:00 UTC. 일간/주간(월요일)/월간(1일) 모두 이 시각으로 끊는다.
+DAY_MS = 86_400_000
+KST_MS = 9 * 3_600_000
+EVENT_RETAIN_MS = 75 * DAY_MS   # 주간·월간·전월 비교에 필요한 기간
+HIST_RETAIN_MS = 100 * DAY_MS   # 중복 방지 기록 (OKX 조회 가능 기간 3개월보다 길게)
+FULL_CLOSE_TYPES = {"2", "3", "6"}  # 2 전체청산 / 3 강제청산 / 6 ADL 전체
+MATCH_WINDOW_MS = 15 * 60 * 1000    # 체결 이벤트와 정산 기록을 짝지을 허용 시간차
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def fnum(v) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def floor_day_utc(t: int) -> int:
+    return t - (t % DAY_MS)
+
+
+def month_start_utc(t: int) -> int:
+    d = datetime.fromtimestamp(t / 1000, tz=timezone.utc)
+    return int(datetime(d.year, d.month, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+
+def prev_month_start_utc(month_start: int) -> int:
+    d = datetime.fromtimestamp(month_start / 1000, tz=timezone.utc)
+    y, m = (d.year - 1, 12) if d.month == 1 else (d.year, d.month - 1)
+    return int(datetime(y, m, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+
+def ymd(t: int) -> str:
+    return datetime.fromtimestamp(t / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+def ym(t: int) -> str:
+    return datetime.fromtimestamp(t / 1000, tz=timezone.utc).strftime("%Y-%m")
+
+
+def kst_short(t: int) -> str:
+    return datetime.fromtimestamp((t + KST_MS) / 1000, tz=timezone.utc).strftime("%m/%d %H:%M")
+
+
+def kst_full(t: int) -> str:
+    return datetime.fromtimestamp((t + KST_MS) / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+
+def money(v: float) -> str:
+    v = float(v or 0)
+    sign = "+" if v > 0 else "-" if v < 0 else ""
+    return f"{sign}{abs(v):,.2f}"
+
+
+def new_ledger() -> dict:
+    return {
+        "started_at": 0,
+        "total": 0.0,       # 총 수익금 (리셋 없음)
+        "cursor": 0,        # 처리한 positions-history 최대 uTime
+        "hist": {},         # posId:cTime -> {r 누적실현, c 누적청산수량, u uTime, f 전체청산여부}
+        "events": [],       # 실현손익 발생 기록 {t, d, inst, dir}
+        "trades": [],       # 전체청산 완료 거래 {t, inst, dir, lever, pnl, type}
+        "eq": {},           # 리포트 시점 시드 YYYY-MM-DD -> 값 (수익률 분모)
+        "months": {},       # YYYY-MM -> 월 수익금 (월간 리포트 때 기록, 전월 비교용)
+        "last_report_day": "",
+    }
+
+
+def _hkey(h: dict) -> str:
+    return f"{h['posId']}:{h['cTime']}"
+
+
+def fetch_positions_history_since(cursor: int, max_pages: int) -> list[dict]:
+    """positions-history를 최신순으로 받아 cursor 이전까지 거슬러 올라간다 (최근 3개월 범위)."""
+    out: list[dict] = []
+    for inst_type in INST_TYPES:
+        after = None
+        for _ in range(max_pages):
+            params = {"instType": inst_type, "limit": "100"}
+            if after:
+                params["after"] = after
+            data = okx_request("GET", "/api/v5/account/positions-history", params)
+            if not data:
+                break
+            out.extend(data)
+            min_u = min(int(d["uTime"]) for d in data)
+            if cursor and min_u <= cursor:
+                break
+            if len(data) < 100:
+                break
+            after = str(min_u)
+    return out
+
+
+def ledger_month_pnl(led: dict, t: int) -> float:
+    ms = month_start_utc(t)
+    return sum(e["d"] for e in led["events"] if ms <= e["t"] <= t)
+
+
+def init_ledger(led: dict, now: int) -> None:
+    """기존 정산 기록은 기준점으로만 저장하고 수익금에는 넣지 않는다."""
+    for h in fetch_positions_history_since(0, 3):
+        led["hist"][_hkey(h)] = {
+            "r": fnum(h.get("realizedPnl")),
+            "c": fnum(h.get("closeTotalPos")),
+            "u": int(h["uTime"]),
+            "f": str(h.get("type")) in FULL_CLOSE_TYPES,
+        }
+        led["cursor"] = max(led["cursor"], int(h["uTime"]))
+    led["started_at"] = now
+    led["last_report_day"] = ymd(floor_day_utc(now))  # 첫 리포트는 다음 09:00부터
+
+
+def start_ledger(state: dict, curr_positions: dict, total_eq: float) -> None:
+    """원장이 없으면(최초 실행 또는 기존 봇 업그레이드 직후) 기준점을 잡고 시작 메시지를 보낸다."""
+    if "pnl" in state:
+        return
+    now = now_ms()
+    led = new_ledger()
+    init_ledger(led, now)
+    base_eq = compute_base_eq(curr_positions, total_eq)
+    if base_eq > 0:
+        led["eq"][ymd(floor_day_utc(now))] = base_eq
+    state["pnl"] = led
+    tg_send(
+        f"📒 <b>매매일지 기록 시작</b>\n{kst_full(now)} KST\n\n"
+        f"이 시점 이후 청산분부터 월/총 수익금에 집계합니다.\n"
+        f"리포트: 매일 09:00 일간 · 월요일 주간 · 1일 월간"
+    )
+    time.sleep(TELEGRAM_SEND_DELAY)
+
+
+def update_ledger(led: dict) -> list[dict]:
+    """새로 확정된 실현손익을 원장에 반영하고, 청산 관련 변화 목록을 돌려준다."""
+    hist = fetch_positions_history_since(led["cursor"], 10)
+    hist.sort(key=lambda h: int(h["uTime"]))
+    changes: list[dict] = []
+    for h in hist:
+        k = _hkey(h)
+        u = int(h["uTime"])
+        prev = led["hist"].get(k, {"r": 0.0, "c": 0.0, "u": 0, "f": False})
+        if u <= prev["u"]:
+            continue
+        r = fnum(h.get("realizedPnl"))
+        c = fnum(h.get("closeTotalPos"))
+        full = str(h.get("type")) in FULL_CLOSE_TYPES
+        delta = r - prev["r"]
+        newly_full = full and not prev["f"]
+        closed_more = c > prev["c"] + 1e-12
+        direction = h.get("direction") or h.get("posSide")
+
+        if abs(delta) > 1e-12:
+            led["events"].append({"t": u, "d": delta, "inst": h["instId"], "dir": direction})
+            led["total"] += delta
+        if newly_full:
+            led["trades"].append({
+                "t": u, "inst": h["instId"], "dir": direction, "lever": h.get("lever"),
+                "pnl": r, "type": str(h.get("type")),
+            })
+        # 청산이 실제로 일어난 변화만 체결 이벤트와 짝짓는다 (펀딩비만 바뀐 경우는 조용히 합산)
+        if newly_full or closed_more:
+            changes.append({
+                "inst": h["instId"], "dir": direction, "t": u, "delta": delta, "r": r,
+                "full": newly_full, "ccy": h.get("ccy") or "USDT", "lever": h.get("lever"),
+                "type": str(h.get("type")), "open": h.get("openAvgPx"), "close": h.get("closeAvgPx"),
+                "month_after": ledger_month_pnl(led, u), "total_after": led["total"], "used": False,
+            })
+        led["hist"][k] = {"r": r, "c": c, "u": u, "f": full or prev["f"]}
+        led["cursor"] = max(led["cursor"], u)
+    return changes
+
+
+def attach_ledger(ev: dict, changes: list[dict], led: dict) -> None:
+    """청산 체결 이벤트에 같은 종목·방향·근접 시각의 정산 기록을 붙인다."""
+    if ev["type"] not in ("partial_close", "full_close"):
+        return
+    want_dir = "long" if ev["direction"] == "롱" else "short"
+    ts = int(ev.get("ts") or 0)
+    best = None
+    for ch in changes:
+        if ch["used"] or ch["inst"] != ev["instId"] or ch["dir"] != want_dir:
+            continue
+        if ts and abs(ch["t"] - ts) > MATCH_WINDOW_MS:
+            continue
+        if ev["type"] == "full_close" and not ch["full"]:
+            continue
+        if best is None or abs(ch["t"] - ts) < abs(best["t"] - ts):
+            best = ch
+    if best:
+        best["used"] = True
+        ev["ledger"] = best
+    else:
+        now = now_ms()
+        ev["ledger_now"] = (ledger_month_pnl(led, now), led["total"])
+
+
+def pnl_tail(ev: dict) -> str:
+    """청산 메시지 하단: 실현손익(USDT) + 월/총 수익금."""
+    ch = ev.get("ledger")
+    if ch:
+        if ev["type"] == "full_close":
+            line = f"실현손익: <b>{money(ch['r'])}</b> {ch['ccy']}"
+            if abs(ch["r"] - ch["delta"]) > 1e-9:
+                line += f"\n(이번 청산분 {money(ch['delta'])} · 이전 부분청산 포함 합계)"
+        else:
+            line = f"실현손익: {money(ch['delta'])} {ch['ccy']}"
+        return f"{line}\n월 {money(ch['month_after'])} · 총 {money(ch['total_after'])} USDT"
+    if "ledger_now" in ev:
+        m, t = ev["ledger_now"]
+        return f"실현손익: 아직 정산 기록 없음 (반영되면 [정산 반영]으로 기록)\n월 {money(m)} · 총 {money(t)} USDT"
+    return ""
+
+
+def format_late_settlement(ch: dict) -> str:
+    """체결 메시지보다 정산 기록이 늦게 들어온 경우의 후속 기록."""
+    direction = "롱" if ch["dir"] == "long" else "숏"
+    label = "전량매도" if ch["full"] else "부분매도"
+    if ch["type"] in ("3", "4"):
+        label = "강제청산"
+    elif ch["type"] in ("5", "6"):
+        label = "ADL"
+    amount = ch["r"] if ch["full"] else ch["delta"]
+    note = ""
+    if ch["full"] and abs(ch["r"] - ch["delta"]) > 1e-9:
+        note = f"(이번 청산분 {money(ch['delta'])} · 이전 부분청산 포함 합계)\n"
+    return (
+        f"<b>[정산 반영]</b> {event_header(ch['inst'], direction, ch.get('lever') or '?')} {label}\n"
+        f"\n"
+        f"실현손익: <b>{money(amount)}</b> {ch['ccy']}\n"
+        f"{note}"
+        f"월 {money(ch['month_after'])} · 총 {money(ch['total_after'])} USDT"
+    )
+
+
+def prune_ledger(led: dict, now: int) -> None:
+    led["events"] = [e for e in led["events"] if now - e["t"] < EVENT_RETAIN_MS]
+    led["trades"] = [t for t in led["trades"] if now - t["t"] < EVENT_RETAIN_MS]
+    led["hist"] = {k: v for k, v in led["hist"].items() if now - v["u"] < HIST_RETAIN_MS}
+    cutoff = ymd(now - EVENT_RETAIN_MS)
+    led["eq"] = {k: v for k, v in led["eq"].items() if k >= cutoff}
+
+
+# ---------------------------------------------------------------------------
+# 리포트 (일간 / 주간 / 월간)
+# ---------------------------------------------------------------------------
+def window_stats(led: dict, start: int, end: int) -> dict:
+    ev = sorted((e for e in led["events"] if start <= e["t"] < end), key=lambda e: e["t"])
+    tr = [t for t in led["trades"] if start <= t["t"] < end]
+    wins = [t for t in tr if t["pnl"] > 0]
+    losses = [t for t in tr if t["pnl"] < 0]
+    gp = sum(t["pnl"] for t in wins)
+    gl = abs(sum(t["pnl"] for t in losses))
+    best = max(tr, key=lambda t: t["pnl"]) if tr else None
+    worst = min(tr, key=lambda t: t["pnl"]) if tr else None
+    cum = peak = mdd = 0.0
+    by_dir = {"long": 0.0, "short": 0.0}
+    by_inst: dict[str, float] = {}
+    for e in ev:
+        cum += e["d"]
+        peak = max(peak, cum)
+        mdd = max(mdd, peak - cum)
+        by_dir["short" if e["dir"] == "short" else "long"] += e["d"]
+        by_inst[ticker(e["inst"])] = by_inst.get(ticker(e["inst"]), 0.0) + e["d"]
+    return {
+        "pnl": sum(e["d"] for e in ev), "n": len(tr), "w": len(wins), "l": len(losses),
+        "gp": gp, "gl": gl, "best": best, "worst": worst, "mdd": mdd,
+        "by_dir": by_dir, "by_inst": by_inst,
+    }
+
+
+def _pct(pnl: float, base) -> str:
+    if not base:
+        return "수익률 확인 불가"
+    return f"{pnl / base * 100:+.2f}%"
+
+
+def _stat_lines(s: dict) -> list[str]:
+    if not s["n"]:
+        return ["완료 거래 0회"]
+    pf = f"{s['gp'] / s['gl']:.2f}" if s["gl"] > 0 else ("∞ (손실 없음)" if s["gp"] > 0 else "-")
+    dir_ko = lambda d: "숏" if d == "short" else "롱"
+    return [
+        f"완료 거래 {s['n']}회 · 승률 {s['w'] / s['n'] * 100:.1f}% ({s['w']}승 {s['l']}패)",
+        f"손익비(PF) {pf}",
+        f"최고 {money(s['best']['pnl'])} {ticker(s['best']['inst'])} {dir_ko(s['best']['dir'])}",
+        f"최저 {money(s['worst']['pnl'])} {ticker(s['worst']['inst'])} {dir_ko(s['worst']['dir'])}",
+    ]
+
+
+SEP = "━━━━━━━━━━━━"
+
+
+def build_daily(led: dict, day_end: int, curr_positions: dict) -> str:
+    start = day_end - DAY_MS
+    s = window_stats(led, start, day_end)
+    lines = [
+        "📊 <b>일간 리포트</b>",
+        f"{kst_short(start)} ~ {kst_short(day_end)}",
+        SEP,
+        f"실현손익 <b>{money(s['pnl'])}</b> USDT ({_pct(s['pnl'], led['eq'].get(ymd(start)))})",
+        *_stat_lines(s),
+        SEP,
+        f"월 {money(ledger_month_pnl(led, day_end - 1))} · 총 {money(led['total'])} USDT",
+        SEP,
+    ]
+    if not curr_positions:
+        lines.append("보유 포지션 없음")
+    else:
+        lines.append(f"보유 포지션 {len(curr_positions)}개")
+        for p in curr_positions.values():
+            icon = "📈" if direction_label(p) == "롱" else "📉"
+            upl_pct = fnum(p.get("uplRatio")) * 100
+            lines.append(f"• {ticker(p['instId'])} {icon} {p.get('lever')}x | 평단 {fmt_num(p['avgPx'])} | {upl_pct:+.2f}%")
+    return "\n".join(lines)
+
+
+def build_weekly(led: dict, week_end: int) -> str:
+    start = week_end - 7 * DAY_MS
+    s = window_stats(led, start, week_end)
+    p = window_stats(led, start - 7 * DAY_MS, start)
+    return "\n".join([
+        "🗓 <b>주간 리포트</b>",
+        f"{kst_short(start)} ~ {kst_short(week_end)}",
+        SEP,
+        f"주 수익금 <b>{money(s['pnl'])}</b> USDT ({_pct(s['pnl'], led['eq'].get(ymd(start)))})",
+        f"전주 대비 {money(s['pnl'] - p['pnl'])} (전주 {money(p['pnl'])})",
+        *_stat_lines(s),
+        SEP,
+        f"월 {money(ledger_month_pnl(led, week_end - 1))} · 총 {money(led['total'])} USDT",
+    ])
+
+
+def build_monthly(led: dict, month_end: int) -> tuple[str, str, float]:
+    start = prev_month_start_utc(month_end)
+    prev_key = ym(prev_month_start_utc(start))
+    key = ym(start)
+    s = window_stats(led, start, month_end)
+    prev_pnl = led["months"].get(prev_key)
+    lines = [
+        f"📅 <b>월간 리포트 · {key}</b>",
+        f"{kst_short(start)} ~ {kst_short(month_end)}",
+        SEP,
+        f"월 수익금 <b>{money(s['pnl'])}</b> USDT ({_pct(s['pnl'], led['eq'].get(ymd(start)))})",
+        "전월 대비 확인 불가 (전월 기록 없음)" if prev_pnl is None
+        else f"전월 대비 {money(s['pnl'] - prev_pnl)} (전월 {money(prev_pnl)})",
+        f"총 수익금 {money(led['total'])} USDT",
+        SEP,
+        *_stat_lines(s),
+        f"월중 최대낙폭 {'-' + format(s['mdd'], ',.2f') if s['mdd'] > 0 else '0.00'} USDT (실현손익 기준)",
+        SEP,
+        f"롱 {money(s['by_dir']['long'])} · 숏 {money(s['by_dir']['short'])}",
+    ]
+    if s["by_inst"]:
+        lines.append("종목별:")
+        for k, v in sorted(s["by_inst"].items(), key=lambda kv: -kv[1]):
+            lines.append(f"• {k} {money(v)}")
+    return "\n".join(lines), key, s["pnl"]
+
+
+def run_reports(led: dict, now: int, curr_positions: dict, base_eq: float) -> list[str]:
+    """09:00 KST(00:00 UTC) 이후 첫 실행에서 한 번만 리포트를 만든다."""
+    day_end = floor_day_utc(now)
+    day_key = ymd(day_end)
+    if led.get("last_report_day") == day_key:
+        return []
+    if base_eq > 0:
+        led["eq"][day_key] = base_eq  # 오늘 시작 시점 시드 = 다음 리포트들의 수익률 분모
+    reports = [build_daily(led, day_end, curr_positions)]
+    d = datetime.fromtimestamp(day_end / 1000, tz=timezone.utc)
+    if d.weekday() == 0:  # 월요일
+        reports.append(build_weekly(led, day_end))
+    if d.day == 1:
+        text, key, pnl = build_monthly(led, day_end)
+        led["months"][key] = pnl
+        reports.append(text)
+    led["last_report_day"] = day_key
+    return reports
+
+
+# ---------------------------------------------------------------------------
 # 메인 로직
 # ---------------------------------------------------------------------------
 def main():
@@ -897,6 +1298,7 @@ def main():
         state["last_bill_id"] = get_latest_bill_id()
         state["last_base_eq"] = compute_base_eq(curr_positions, total_eq)
         print(f"[init] 확보한 체크포인트 last_bill_id={state['last_bill_id']}")
+        start_ledger(state, curr_positions, total_eq)
         summary_id = tg_send(format_summary(curr_positions, total_eq))
         tg_pin(summary_id)
         state["summary_message_id"] = summary_id
@@ -904,6 +1306,12 @@ def main():
         save_state(state)
         print("최초 실행: 베이스라인 저장 및 요약 메시지 고정 완료")
         return
+
+    # 기존 봇에서 업그레이드된 직후라면 손익 원장만 새로 시작
+    start_ledger(state, curr_positions, total_eq)
+    led = state["pnl"]
+    ledger_changes = update_ledger(led)  # 체결 메시지를 만들기 전에 정산 기록부터 반영
+    save_state(state)
 
     # last_bill_id가 비어있어도(초기화 당시 조회 실패 등) get_new_fills가 0으로 간주해
     # 최근 체결을 전부 "새 것"으로 처리하므로, 별도 분기 없이 그대로 호출하면 된다.
@@ -951,6 +1359,7 @@ def main():
                     start_ts = entry_ts.pop(key, None)
                     if start_ts and ev.get("ts"):
                         ev["hold_hours"] = (int(ev["ts"]) - int(start_ts)) / 1000 / 3600
+                attach_ledger(ev, ledger_changes, led)
                 tg_send(format_fill_event(ev), reply_to=thread_ids.get(key))
                 if ev["type"] == "full_close":
                     thread_ids.pop(key, None)
@@ -961,6 +1370,13 @@ def main():
         state["thread_root_message_id"] = thread_ids
         state["entry_ts"] = entry_ts
         save_state(state)
+
+    # 이전 실행에서 "정산 반영 대기"로 나갔던 청산의 실현손익이 이제 들어온 경우 후속 기록
+    for ch in ledger_changes:
+        if not ch["used"]:
+            tg_send(format_late_settlement(ch))
+            total_events += 1
+            time.sleep(TELEGRAM_SEND_DELAY)
 
     # 요약은 변동(체결 이벤트 / 레버리지 변경 / 입출금으로 인한 시드 변화)이 있을 때만
     # 새 메시지로 다시 보내고, 그걸 새로 고정한 뒤 이전 고정은 해제한다.
@@ -992,8 +1408,18 @@ def main():
     state["entry_ts"] = entry_ts
     state["last_base_eq"] = base_eq_now
     save_state(state)
+
+    # 09:00 KST 이후 첫 실행이면 일간(+월요일 주간, +1일 월간) 리포트
+    reports = run_reports(led, now_ms(), curr_positions, base_eq_now)
+    prune_ledger(led, now_ms())
+    save_state(state)  # 리포트를 보내기 전에 저장 -> 전송 도중 실패해도 같은 리포트를 다시 쏟아내지 않음
+    for text in reports:
+        tg_send(text)
+        time.sleep(TELEGRAM_SEND_DELAY)
+
     print(f"실행 완료: 체결 {len(fills)}건 -> 이벤트 {total_events + len(lever_events)}건 처리"
-          f"{' (+시드 변화 감지)' if seed_changed else ''}")
+          f"{' (+시드 변화 감지)' if seed_changed else ''}"
+          f" | 리포트 {len(reports)}건 | 총 수익금 {led['total']:.2f}")
 
 
 if __name__ == "__main__":
