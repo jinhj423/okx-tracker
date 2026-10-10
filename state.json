@@ -1,12 +1,12 @@
 {
   "initialized": true,
   "positions": {},
-  "summary_message_id": 18316,
+  "summary_message_id": 8,
   "thread_root_message_id": {
     "DOGE-USDT-SWAP|long": 7502
   },
   "last_bill_id": "3992015776496144385",
-  "last_base_eq": 0.0,
+  "last_base_eq": 1455.0197511361876,
   "entry_ts": {
     "DOGE-USDT-SWAP|long": "1787932870483"
   },
