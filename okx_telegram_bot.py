@@ -18,9 +18,8 @@ OKX 선물 포지션 <-> 텔레그램 연동 봇 (자동 매매일지)
   그룹의 지정된 토픽(message_thread_id)에 기록을 남긴다. 레버리지만 바뀌고
   수량 변화가 없는 경우는 체결 기록에 남지 않으므로, 이 부분만 별도로 포지션
   스냅샷을 비교해 감지한다.
-- 토픽 상단에는 "진행중인 포지션" 요약 메시지를 고정해두는데, 계속 같은 메시지를 수정하는
-  대신 변동(체결 또는 레버리지 변경)이 있을 때만 새 메시지를 보내 그걸 새로 고정하고
-  이전 고정은 해제한다. 개별 이벤트는 별도의 불변 로그 메시지로 쌓이며,
+- "진행중인 포지션" 요약 메시지는 변동(체결 또는 레버리지 변경)이 있을 때만
+  매매 메시지들 맨 끝에 새로 보낸다 (고정하지 않음). 개별 이벤트는 별도의 불변 로그 메시지로 쌓이며,
   같은 포지션에 속한 이벤트는 최초 진입 메시지에 답장(reply)으로 이어붙는다.
 - GitHub Actions로 몇 분 간격 폴링하는 구조라 완전한 실시간은 아니지만, 폴링 사이에
   일어난 모든 체결을 하나도 빠짐없이 반영하는 것을 정확도의 핵심으로 삼는다.
@@ -1300,11 +1299,11 @@ def main():
         print(f"[init] 확보한 체크포인트 last_bill_id={state['last_bill_id']}")
         start_ledger(state, curr_positions, total_eq)
         summary_id = tg_send(format_summary(curr_positions, total_eq))
-        tg_pin(summary_id)
         state["summary_message_id"] = summary_id
+        state["pin_cleared"] = True
         state["thread_root_message_id"] = {}
         save_state(state)
-        print("최초 실행: 베이스라인 저장 및 요약 메시지 고정 완료")
+        print("최초 실행: 베이스라인 저장 및 요약 메시지 전송 완료")
         return
 
     # 기존 봇에서 업그레이드된 직후라면 손익 원장만 새로 시작
@@ -1388,19 +1387,20 @@ def main():
     prev_base_eq = state.get("last_base_eq")
     seed_changed = prev_base_eq is not None and abs(base_eq_now - prev_base_eq) > 20.0
 
+    # 진행중인 포지션 요약은 변동이 있을 때 매매 메시지들 맨 끝에 새로 보낸다 (고정은 하지 않음).
     summary_id = state.get("summary_message_id")
-    if total_events or lever_events or seed_changed:
-        old_summary_id = summary_id
-        summary_id = tg_send(format_summary(curr_positions, total_eq))
-        tg_pin(summary_id)
-        if old_summary_id:
+
+    # 예전 버전에서 고정해둔 요약 메시지는 한 번만 고정 해제한다.
+    if not state.get("pin_cleared"):
+        if summary_id:
             try:
-                tg_unpin(old_summary_id)
+                tg_unpin(summary_id)
             except Exception as e:
                 print(f"이전 요약 메시지 고정 해제 실패 (무시하고 진행): {e}")
-    elif not summary_id:
+        state["pin_cleared"] = True
+
+    if total_events or lever_events or seed_changed or not summary_id:
         summary_id = tg_send(format_summary(curr_positions, total_eq))
-        tg_pin(summary_id)
 
     state["positions"] = curr_positions
     state["summary_message_id"] = summary_id
