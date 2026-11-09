@@ -1,89 +1,6 @@
 {
   "initialized": true,
   "positions": {
-    "BTC-USDT-SWAP|short": {
-      "adl": "1",
-      "availPos": "4.29",
-      "avgPx": "75500",
-      "baseBal": "",
-      "baseBorrowed": "",
-      "baseInterest": "",
-      "bePx": "75447.1764117941",
-      "bizRefId": "",
-      "bizRefType": "",
-      "cTime": "1794191530546",
-      "ccy": "USDT",
-      "clSpotInUseAmt": "",
-      "closeAllFlag": "0",
-      "closeOrderAlgo": [
-        {
-          "algoId": "4083293333992898560",
-          "closeFraction": "1.0",
-          "ordType": "",
-          "slDynamicTriggerPxType": "",
-          "slDynamicTriggerPxVal": "",
-          "slTriggerPx": "75100",
-          "slTriggerPxType": "last",
-          "tpDynamicTriggerPxType": "",
-          "tpDynamicTriggerPxVal": "",
-          "tpTriggerPx": "0",
-          "tpTriggerPxType": "last"
-        }
-      ],
-      "deltaBS": "",
-      "deltaPA": "",
-      "estMaxWin": "",
-      "fee": "-0.64779",
-      "fundingFee": "0",
-      "gammaBS": "",
-      "gammaPA": "",
-      "hedgedPos": "",
-      "idxPx": "75011.4",
-      "imr": "",
-      "instId": "BTC-USDT-SWAP",
-      "instType": "SWAP",
-      "interest": "",
-      "last": "74977.8",
-      "lever": "33",
-      "liab": "",
-      "liabCcy": "",
-      "liqPenalty": "0",
-      "liqPx": "77439.30148121332",
-      "margin": "98.15",
-      "markPx": "74975.6",
-      "maxSpotInUseAmt": "",
-      "mgnMode": "isolated",
-      "mgnRatio": "8.335389670117216",
-      "mmr": "12.865812960000001",
-      "nonSettleAvgPx": "",
-      "notionalUsd": "3212.4970025148004",
-      "optVal": "",
-      "pendingCloseOrdLiabVal": "",
-      "pnl": "0",
-      "pos": "4.29",
-      "posCcy": "",
-      "posId": "4047068851644321792",
-      "posSide": "short",
-      "quoteBal": "",
-      "quoteBorrowed": "",
-      "quoteInterest": "",
-      "realizedPnl": "-0.64779",
-      "ruleType": "normal",
-      "settledPnl": "",
-      "spotInUseAmt": "",
-      "spotInUseCcy": "",
-      "thetaBS": "",
-      "thetaPA": "",
-      "tradeId": "3056791481",
-      "uTime": "1794191530546",
-      "upl": "22.496759999999753",
-      "uplLastPx": "22.402379999999877",
-      "uplRatio": "0.2292079470198633",
-      "uplRatioLastPx": "0.2282463576158915",
-      "usdPx": "0.99877",
-      "vegaBS": "",
-      "vegaPA": ""
-    },
     "HYPE-USDT-SWAP|long": {
       "adl": "1",
       "availPos": "779",
@@ -107,25 +24,25 @@
       "gammaBS": "",
       "gammaPA": "",
       "hedgedPos": "",
-      "idxPx": "74.628",
+      "idxPx": "74.787",
       "imr": "",
       "instId": "HYPE-USDT-SWAP",
       "instType": "SWAP",
       "interest": "",
-      "last": "74.596",
+      "last": "74.715",
       "lever": "10",
       "liab": "",
       "liabCcy": "",
       "liqPenalty": "0",
       "liqPx": "69.33255624310719",
       "margin": "596.1239662813170441",
-      "markPx": "74.589",
+      "markPx": "74.715",
       "maxSpotInUseAmt": "",
       "mgnMode": "isolated",
-      "mgnRatio": "10.998873159379249",
-      "mmr": "37.768140149999994",
+      "mgnRatio": "11.221240046643105",
+      "mmr": "37.83194025",
       "nonSettleAvgPx": "",
-      "notionalUsd": "5803.336205787001",
+      "notionalUsd": "5813.255938815",
       "optVal": "",
       "pendingCloseOrdLiabVal": "",
       "pnl": "0",
@@ -145,29 +62,27 @@
       "thetaPA": "",
       "tradeId": "406578416",
       "uTime": "1794182404631",
-      "upl": "-148.7625999999999",
-      "uplLastPx": "-148.2172999999995",
-      "uplRatio": "-0.2496332715397187",
-      "uplRatioLastPx": "-0.2487182228448803",
-      "usdPx": "0.99877",
+      "upl": "-138.94719999999953",
+      "uplLastPx": "-138.94719999999953",
+      "uplRatio": "-0.2331623950326456",
+      "uplRatioLastPx": "-0.2331623950326456",
+      "usdPx": "0.99879",
       "vegaBS": "",
       "vegaPA": ""
     }
   },
-  "summary_message_id": 739,
+  "summary_message_id": 741,
   "thread_root_message_id": {
     "SOL-USDT-SWAP|long": 615,
     "APR-USDT-SWAP|long": 485,
-    "HYPE-USDT-SWAP|long": 710,
-    "BTC-USDT-SWAP|short": 738
+    "HYPE-USDT-SWAP|long": 710
   },
-  "last_bill_id": "4083209656075210753",
-  "last_base_eq": 1116.296711051318,
+  "last_bill_id": "4083353155160428544",
+  "last_base_eq": 1131.5705148521959,
   "entry_ts": {
     "SOL-USDT-SWAP|long": "1793780162748",
     "APR-USDT-SWAP|long": "1793332594243",
-    "HYPE-USDT-SWAP|long": "1794030721201",
-    "BTC-USDT-SWAP|short": "1794191530546"
+    "HYPE-USDT-SWAP|long": "1794030721201"
   },
   "chapter_count": {
     "SOXL-USDT-SWAP|long": 1,
@@ -176,8 +91,8 @@
   },
   "pnl": {
     "started_at": 1791512976872,
-    "total": -3870.687423081636,
-    "cursor": 1794190676053,
+    "total": -3855.786108081636,
+    "cursor": 1794195807152,
     "hist": {
       "3861114737602252801:1791207790301": {
         "r": -1460.798009770901,
@@ -2464,6 +2379,12 @@
         "c": 6.5,
         "u": 1794190676053,
         "f": true
+      },
+      "4047068851644321792:1794191530546": {
+        "r": 14.901315,
+        "c": 4.29,
+        "u": 1794195807152,
+        "f": true
       }
     },
     "events": [
@@ -3144,6 +3065,12 @@
         "d": 25.226734,
         "inst": "BTC-USDT-SWAP",
         "dir": "long"
+      },
+      {
+        "t": 1794195807152,
+        "d": 14.901315,
+        "inst": "BTC-USDT-SWAP",
+        "dir": "short"
       }
     ],
     "trades": [
@@ -3993,6 +3920,14 @@
         "dir": "long",
         "lever": "33.0",
         "pnl": 25.226734,
+        "type": "2"
+      },
+      {
+        "t": 1794195807152,
+        "inst": "BTC-USDT-SWAP",
+        "dir": "short",
+        "lever": "33.0",
+        "pnl": 14.901315,
         "type": "2"
       }
     ],
