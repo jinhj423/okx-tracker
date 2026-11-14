@@ -1,96 +1,24 @@
 {
   "initialized": true,
-  "positions": {
-    "BTC-USDT-SWAP|long": {
-      "adl": "1",
-      "availPos": "6.66",
-      "avgPx": "66306.2",
-      "baseBal": "",
-      "baseBorrowed": "",
-      "baseInterest": "",
-      "bePx": "66372.53936968483",
-      "bizRefId": "",
-      "bizRefType": "",
-      "cTime": "1794666464737",
-      "ccy": "USDT",
-      "clSpotInUseAmt": "",
-      "closeAllFlag": "0",
-      "closeOrderAlgo": [],
-      "deltaBS": "",
-      "deltaPA": "",
-      "estMaxWin": "",
-      "fee": "-2.20799646",
-      "fundingFee": "0",
-      "gammaBS": "",
-      "gammaPA": "",
-      "hedgedPos": "",
-      "idxPx": "65876.1",
-      "imr": "146.199654",
-      "instId": "BTC-USDT-SWAP",
-      "instType": "SWAP",
-      "interest": "",
-      "last": "65850.8",
-      "lever": "30",
-      "liab": "",
-      "liabCcy": "",
-      "liqPenalty": "0",
-      "liqPx": "61417.52181924943",
-      "margin": "",
-      "markPx": "65855.7",
-      "maxSpotInUseAmt": "",
-      "mgnMode": "cross",
-      "mgnRatio": "15.908711618946032",
-      "mmr": "17.54395848",
-      "nonSettleAvgPx": "",
-      "notionalUsd": "4382.4369684078",
-      "optVal": "",
-      "pendingCloseOrdLiabVal": "",
-      "pnl": "0",
-      "pos": "6.66",
-      "posCcy": "",
-      "posId": "3672867197426786304",
-      "posSide": "long",
-      "quoteBal": "",
-      "quoteBorrowed": "",
-      "quoteInterest": "",
-      "realizedPnl": "-2.20799646",
-      "ruleType": "normal",
-      "settledPnl": "",
-      "spotInUseAmt": "",
-      "spotInUseCcy": "",
-      "thetaBS": "",
-      "thetaPA": "",
-      "tradeId": "3076861278",
-      "uTime": "1794666464737",
-      "upl": "-30.0033",
-      "uplLastPx": "-30.32963999999961",
-      "uplRatio": "-0.2038270930923491",
-      "uplRatioLastPx": "-0.2060440803424102",
-      "usdPx": "0.99919",
-      "vegaBS": "",
-      "vegaPA": ""
-    }
-  },
-  "summary_message_id": 837,
+  "positions": {},
+  "summary_message_id": 839,
   "thread_root_message_id": {
     "SOL-USDT-SWAP|long": 615,
     "APR-USDT-SWAP|long": 485,
     "HYPE-USDT-SWAP|long": 710,
     "BCH-USDT-SWAP|long": 763,
     "ZEC-USDT-SWAP|long": 780,
-    "XRP-USDT-SWAP|long": 788,
-    "BTC-USDT-SWAP|long": 835
+    "XRP-USDT-SWAP|long": 788
   },
-  "last_bill_id": "4099145803091595265",
-  "last_base_eq": 343.48245576084867,
+  "last_bill_id": "4099228888260857857",
+  "last_base_eq": 301.75024830609084,
   "entry_ts": {
     "SOL-USDT-SWAP|long": "1793780162748",
     "APR-USDT-SWAP|long": "1793332594243",
     "HYPE-USDT-SWAP|long": "1794030721201",
     "BCH-USDT-SWAP|long": "1794305293460",
     "ZEC-USDT-SWAP|long": "1794357352470",
-    "XRP-USDT-SWAP|long": "1794393642213",
-    "BTC-USDT-SWAP|long": "1794666464737"
+    "XRP-USDT-SWAP|long": "1794393642213"
   },
   "chapter_count": {
     "SOXL-USDT-SWAP|long": 1,
@@ -99,8 +27,8 @@
   },
   "pnl": {
     "started_at": 1791512976872,
-    "total": -5843.232650595525,
-    "cursor": 1794666268403,
+    "total": -5887.435560105525,
+    "cursor": 1794668940868,
     "hist": {
       "3861114737602252801:1791207790301": {
         "r": -1460.798009770901,
@@ -2375,6 +2303,12 @@
         "c": 16.74,
         "u": 1794666268403,
         "f": true
+      },
+      "3672867197426786304:1794666464737": {
+        "r": -44.20290951,
+        "c": 6.66,
+        "u": 1794668940868,
+        "f": true
       }
     },
     "events": [
@@ -3143,6 +3077,12 @@
       {
         "t": 1794666268403,
         "d": -198.56239695713998,
+        "inst": "BTC-USDT-SWAP",
+        "dir": "long"
+      },
+      {
+        "t": 1794668940868,
+        "d": -44.20290951,
         "inst": "BTC-USDT-SWAP",
         "dir": "long"
       }
@@ -4114,6 +4054,14 @@
         "dir": "long",
         "lever": "30.0",
         "pnl": -198.56239695713998,
+        "type": "2"
+      },
+      {
+        "t": 1794668940868,
+        "inst": "BTC-USDT-SWAP",
+        "dir": "long",
+        "lever": "30.0",
+        "pnl": -44.20290951,
         "type": "2"
       }
     ],
