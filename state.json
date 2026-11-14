@@ -1,96 +1,24 @@
 {
   "initialized": true,
-  "positions": {
-    "BTC-USDT-SWAP|long": {
-      "adl": "1",
-      "availPos": "11.28",
-      "avgPx": "65327.674468085106383",
-      "baseBal": "",
-      "baseBorrowed": "",
-      "baseInterest": "",
-      "bePx": "65389.128202505504",
-      "bizRefId": "",
-      "bizRefType": "",
-      "cTime": "1794682821180",
-      "ccy": "USDT",
-      "clSpotInUseAmt": "",
-      "closeAllFlag": "0",
-      "closeOrderAlgo": [],
-      "deltaBS": "",
-      "deltaPA": "",
-      "estMaxWin": "",
-      "fee": "-3.244034412",
-      "fundingFee": "0",
-      "gammaBS": "",
-      "gammaPA": "",
-      "hedgedPos": "",
-      "idxPx": "64551.8",
-      "imr": "242.55271199999999",
-      "instId": "BTC-USDT-SWAP",
-      "instType": "SWAP",
-      "interest": "",
-      "last": "64522.5",
-      "lever": "30",
-      "liab": "",
-      "liabCcy": "",
-      "liqPenalty": "0",
-      "liqPx": "62825.06401083049",
-      "margin": "",
-      "markPx": "64508.7",
-      "maxSpotInUseAmt": "",
-      "mgnMode": "cross",
-      "mgnRatio": "6.773759119892167",
-      "mmr": "29.10632544",
-      "nonSettleAvgPx": "",
-      "notionalUsd": "7270.0324367759995",
-      "optVal": "",
-      "pendingCloseOrdLiabVal": "",
-      "pnl": "0",
-      "pos": "11.28",
-      "posCcy": "",
-      "posId": "3672867197426786304",
-      "posSide": "long",
-      "quoteBal": "",
-      "quoteBorrowed": "",
-      "quoteInterest": "",
-      "realizedPnl": "-3.244034412",
-      "ruleType": "normal",
-      "settledPnl": "",
-      "spotInUseAmt": "",
-      "spotInUseCcy": "",
-      "thetaBS": "",
-      "thetaPA": "",
-      "tradeId": "3079201198",
-      "uTime": "1794689768953",
-      "upl": "-92.3803200000001",
-      "uplLastPx": "-90.82367999999975",
-      "uplRatio": "-0.3760922800727617",
-      "uplRatioLastPx": "-0.3697549964732594",
-      "usdPx": "0.9991",
-      "vegaBS": "",
-      "vegaPA": ""
-    }
-  },
-  "summary_message_id": 848,
+  "positions": {},
+  "summary_message_id": 850,
   "thread_root_message_id": {
     "SOL-USDT-SWAP|long": 615,
     "APR-USDT-SWAP|long": 485,
     "HYPE-USDT-SWAP|long": 710,
     "BCH-USDT-SWAP|long": 763,
     "ZEC-USDT-SWAP|long": 780,
-    "XRP-USDT-SWAP|long": 788,
-    "BTC-USDT-SWAP|long": 845
+    "XRP-USDT-SWAP|long": 788
   },
-  "last_bill_id": "4099927762822680577",
-  "last_base_eq": 314.604681422742,
+  "last_bill_id": "4099965654903214080",
+  "last_base_eq": 183.20237864194604,
   "entry_ts": {
     "SOL-USDT-SWAP|long": "1793780162748",
     "APR-USDT-SWAP|long": "1793332594243",
     "HYPE-USDT-SWAP|long": "1794030721201",
     "BCH-USDT-SWAP|long": "1794305293460",
     "ZEC-USDT-SWAP|long": "1794357352470",
-    "XRP-USDT-SWAP|long": "1794393642213",
-    "BTC-USDT-SWAP|long": "1794682821180"
+    "XRP-USDT-SWAP|long": "1794393642213"
   },
   "chapter_count": {
     "SOXL-USDT-SWAP|long": 1,
@@ -99,8 +27,8 @@
   },
   "pnl": {
     "started_at": 1791512976872,
-    "total": -5874.088692000525,
-    "cursor": 1794678679521,
+    "total": -6008.155286412525,
+    "cursor": 1794690898225,
     "hist": {
       "3861114737602252801:1791207790301": {
         "r": -1460.798009770901,
@@ -2381,6 +2309,12 @@
         "c": 13.59,
         "u": 1794678679521,
         "f": true
+      },
+      "3672867197426786304:1794682821180": {
+        "r": -134.066594412,
+        "c": 11.28,
+        "u": 1794690898225,
+        "f": true
       }
     },
     "events": [
@@ -3161,6 +3095,12 @@
       {
         "t": 1794678679521,
         "d": 13.346868105,
+        "inst": "BTC-USDT-SWAP",
+        "dir": "long"
+      },
+      {
+        "t": 1794690898225,
+        "d": -134.066594412,
         "inst": "BTC-USDT-SWAP",
         "dir": "long"
       }
@@ -4148,6 +4088,14 @@
         "dir": "long",
         "lever": "30.0",
         "pnl": 13.346868105,
+        "type": "2"
+      },
+      {
+        "t": 1794690898225,
+        "inst": "BTC-USDT-SWAP",
+        "dir": "long",
+        "lever": "30.0",
+        "pnl": -134.066594412,
         "type": "2"
       }
     ],
