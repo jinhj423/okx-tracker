@@ -24,7 +24,7 @@
       "gammaBS": "",
       "gammaPA": "",
       "hedgedPos": "",
-      "idxPx": "137.449",
+      "idxPx": "137.511",
       "imr": "49.04880000000001",
       "instId": "SPCX-USDT-SWAP",
       "instType": "SWAP",
@@ -42,7 +42,7 @@
       "mgnRatio": "472.4281615164878",
       "mmr": "0.5885856",
       "nonSettleAvgPx": "",
-      "notionalUsd": "147.03015434400004",
+      "notionalUsd": "147.025739952",
       "optVal": "",
       "pendingCloseOrdLiabVal": "",
       "pnl": "0",
@@ -66,7 +66,7 @@
       "uplLastPx": "-1.9581000000000135",
       "uplRatio": "-0.0396096440872561",
       "uplRatioLastPx": "-0.0393943742824342",
-      "usdPx": "0.99921",
+      "usdPx": "0.99918",
       "vegaBS": "",
       "vegaPA": ""
     }
@@ -82,7 +82,7 @@
     "SPCX-USDT-SWAP|long": 877
   },
   "last_bill_id": "4105463446211842063",
-  "last_base_eq": 314.54413623980315,
+  "last_base_eq": 314.53475157059967,
   "entry_ts": {
     "SOL-USDT-SWAP|long": "1793780162748",
     "APR-USDT-SWAP|long": "1793332594243",
