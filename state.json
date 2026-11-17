@@ -24,25 +24,25 @@
       "gammaBS": "",
       "gammaPA": "",
       "hedgedPos": "",
-      "idxPx": "137.81",
-      "imr": "49.17006666666668",
+      "idxPx": "137.826",
+      "imr": "49.16293333333334",
       "instId": "SPCX-USDT-SWAP",
       "instType": "SWAP",
       "interest": "",
-      "last": "137.86",
+      "last": "137.84",
       "lever": "3",
       "liab": "",
       "liabCcy": "",
       "liqPenalty": "0",
       "liqPx": "",
       "margin": "",
-      "markPx": "137.86",
+      "markPx": "137.84",
       "maxSpotInUseAmt": "",
       "mgnMode": "cross",
-      "mgnRatio": "471.8110860822788",
-      "mmr": "0.5900408",
+      "mgnRatio": "471.84730036896775",
+      "mmr": "0.5899552",
       "nonSettleAvgPx": "",
-      "notionalUsd": "147.37006531000003",
+      "notionalUsd": "147.34868564",
       "optVal": "",
       "pendingCloseOrdLiabVal": "",
       "pnl": "0",
@@ -62,10 +62,10 @@
       "thetaPA": "",
       "tradeId": "98846361",
       "uTime": "1794792692109",
-      "upl": "-1.605",
-      "uplLastPx": "-1.605",
-      "uplRatio": "-0.0322904707233064",
-      "uplRatioLastPx": "-0.0322904707233064",
+      "upl": "-1.626400000000011",
+      "uplLastPx": "-1.626400000000011",
+      "uplRatio": "-0.0327210103329508",
+      "uplRatioLastPx": "-0.0327210103329508",
       "usdPx": "0.99905",
       "vegaBS": "",
       "vegaPA": ""
@@ -82,7 +82,7 @@
     "SPCX-USDT-SWAP|long": 877
   },
   "last_bill_id": "4105463446211842063",
-  "last_base_eq": 314.4830491959176,
+  "last_base_eq": 314.4937593602416,
   "entry_ts": {
     "SOL-USDT-SWAP|long": "1793780162748",
     "APR-USDT-SWAP|long": "1793332594243",
@@ -4257,12 +4257,13 @@
       "2026-11-13": 2761.9506580582956,
       "2026-11-14": 820.1288715868504,
       "2026-11-15": 186.64895334152908,
-      "2026-11-16": 276.0558537339094
+      "2026-11-16": 276.0558537339094,
+      "2026-11-17": 314.4937593602416
     },
     "months": {
       "2026-10": -1187.7646077321751
     },
-    "last_report_day": "2026-11-16"
+    "last_report_day": "2026-11-17"
   },
   "pin_cleared": true
 }
