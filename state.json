@@ -1,110 +1,24 @@
 {
   "initialized": true,
-  "positions": {
-    "BTC-USDT-SWAP|short": {
-      "adl": "1",
-      "availPos": "4.63",
-      "avgPx": "63758.3",
-      "baseBal": "",
-      "baseBorrowed": "",
-      "baseInterest": "",
-      "bePx": "63693.44740040989",
-      "bizRefId": "",
-      "bizRefType": "",
-      "cTime": "1795086173791",
-      "ccy": "USDT",
-      "clSpotInUseAmt": "",
-      "closeAllFlag": "0",
-      "closeOrderAlgo": [
-        {
-          "algoId": "4113771981031997440",
-          "closeFraction": "1.0",
-          "ordType": "",
-          "slDynamicTriggerPxType": "",
-          "slDynamicTriggerPxVal": "",
-          "slTriggerPx": "63200",
-          "slTriggerPxType": "last",
-          "tpDynamicTriggerPxType": "",
-          "tpDynamicTriggerPxVal": "",
-          "tpTriggerPx": "0",
-          "tpTriggerPxType": ""
-        }
-      ],
-      "deltaBS": "",
-      "deltaPA": "",
-      "estMaxWin": "",
-      "fee": "-1.476004645",
-      "fundingFee": "-0.0521674087026975",
-      "gammaBS": "",
-      "gammaPA": "",
-      "hedgedPos": "",
-      "idxPx": "63106.4",
-      "imr": "97.356862",
-      "instId": "BTC-USDT-SWAP",
-      "instType": "SWAP",
-      "interest": "",
-      "last": "63078.9",
-      "lever": "30",
-      "liab": "",
-      "liabCcy": "",
-      "liqPenalty": "0",
-      "liqPx": "75397.13518929742",
-      "margin": "",
-      "markPx": "63082.2",
-      "maxSpotInUseAmt": "",
-      "mgnMode": "cross",
-      "mgnRatio": "44.5775416754269",
-      "mmr": "11.68282344",
-      "nonSettleAvgPx": "",
-      "notionalUsd": "2917.7267400228",
-      "optVal": "",
-      "pendingCloseOrdLiabVal": "",
-      "pnl": "0",
-      "pos": "4.63",
-      "posCcy": "",
-      "posId": "3672443503567101952",
-      "posSide": "short",
-      "quoteBal": "",
-      "quoteBorrowed": "",
-      "quoteInterest": "",
-      "realizedPnl": "-1.5281720537026975",
-      "ruleType": "normal",
-      "settledPnl": "",
-      "spotInUseAmt": "",
-      "spotInUseCcy": "",
-      "thetaBS": "",
-      "thetaPA": "",
-      "tradeId": "3098607016",
-      "uTime": "1795104000295",
-      "upl": "31.303430000000272",
-      "uplLastPx": "31.456220000000066",
-      "uplRatio": "0.3181232874778683",
-      "uplRatioLastPx": "0.3196760264938059",
-      "usdPx": "0.99898",
-      "vegaBS": "",
-      "vegaPA": ""
-    }
-  },
-  "summary_message_id": 931,
+  "positions": {},
+  "summary_message_id": 933,
   "thread_root_message_id": {
     "SOL-USDT-SWAP|long": 615,
     "APR-USDT-SWAP|long": 485,
     "HYPE-USDT-SWAP|long": 710,
     "BCH-USDT-SWAP|long": 763,
     "ZEC-USDT-SWAP|long": 780,
-    "XRP-USDT-SWAP|long": 788,
-    "BTC-USDT-SWAP|short": 928
+    "XRP-USDT-SWAP|long": 788
   },
-  "last_bill_id": "4113248765187379200",
-  "last_base_eq": 554.0033314140488,
+  "last_bill_id": "4113852269463523328",
+  "last_base_eq": 578.4000903423923,
   "entry_ts": {
     "SOL-USDT-SWAP|long": "1793780162748",
     "APR-USDT-SWAP|long": "1793332594243",
     "HYPE-USDT-SWAP|long": "1794030721201",
     "BCH-USDT-SWAP|long": "1794305293460",
     "ZEC-USDT-SWAP|long": "1794357352470",
-    "XRP-USDT-SWAP|long": "1794393642213",
-    "BTC-USDT-SWAP|short": "1795086173791"
+    "XRP-USDT-SWAP|long": "1794393642213"
   },
   "chapter_count": {
     "SOXL-USDT-SWAP|long": 1,
@@ -113,8 +27,8 @@
   },
   "pnl": {
     "started_at": 1791512976872,
-    "total": -5635.401954047882,
-    "cursor": 1795086765760,
+    "total": -5612.543916101585,
+    "cursor": 1795104751589,
     "hist": {
       "3861114737602252801:1791207790301": {
         "r": -1460.798009770901,
@@ -2371,6 +2285,12 @@
         "c": 9.48,
         "u": 1795086765760,
         "f": true
+      },
+      "3672443503567101952:1795086173791": {
+        "r": 22.8580379462973,
+        "c": 4.63,
+        "u": 1795104751589,
+        "f": true
       }
     },
     "events": [
@@ -3261,6 +3181,12 @@
         "d": 21.159377927010546,
         "inst": "ETH-USDT-SWAP",
         "dir": "long"
+      },
+      {
+        "t": 1795104751589,
+        "d": 22.8580379462973,
+        "inst": "BTC-USDT-SWAP",
+        "dir": "short"
       }
     ],
     "trades": [
@@ -4390,6 +4316,14 @@
         "dir": "long",
         "lever": "17.0",
         "pnl": 21.159377927010546,
+        "type": "2"
+      },
+      {
+        "t": 1795104751589,
+        "inst": "BTC-USDT-SWAP",
+        "dir": "short",
+        "lever": "30.0",
+        "pnl": 22.8580379462973,
         "type": "2"
       }
     ],
