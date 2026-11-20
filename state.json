@@ -1,96 +1,24 @@
 {
   "initialized": true,
-  "positions": {
-    "BTC-USDT-SWAP|long": {
-      "adl": "1",
-      "availPos": "9.56",
-      "avgPx": "61708.3569037656903766",
-      "baseBal": "",
-      "baseBorrowed": "",
-      "baseInterest": "",
-      "bePx": "61760.35374697156",
-      "bizRefId": "",
-      "bizRefType": "",
-      "cTime": "1795122133950",
-      "ccy": "USDT",
-      "clSpotInUseAmt": "",
-      "closeAllFlag": "0",
-      "closeOrderAlgo": [],
-      "deltaBS": "",
-      "deltaPA": "",
-      "estMaxWin": "",
-      "fee": "-2.06480538",
-      "fundingFee": "0.046052078624425",
-      "gammaBS": "",
-      "gammaPA": "",
-      "hedgedPos": "",
-      "idxPx": "62041.5",
-      "imr": "197.5988266666667",
-      "instId": "BTC-USDT-SWAP",
-      "instType": "SWAP",
-      "interest": "",
-      "last": "62012.6",
-      "lever": "30",
-      "liab": "",
-      "liabCcy": "",
-      "liqPenalty": "0",
-      "liqPx": "55924.92997694873",
-      "margin": "",
-      "markPx": "62008",
-      "maxSpotInUseAmt": "",
-      "mgnMode": "cross",
-      "mgnRatio": "22.702204045168155",
-      "mmr": "23.711859200000003",
-      "nonSettleAvgPx": "",
-      "notionalUsd": "5921.266199776001",
-      "optVal": "",
-      "pendingCloseOrdLiabVal": "",
-      "pnl": "0",
-      "pos": "9.56",
-      "posCcy": "",
-      "posId": "3672867197426786304",
-      "posSide": "long",
-      "quoteBal": "",
-      "quoteBorrowed": "",
-      "quoteInterest": "",
-      "realizedPnl": "-2.018753301375575",
-      "ruleType": "normal",
-      "settledPnl": "",
-      "spotInUseAmt": "",
-      "spotInUseCcy": "",
-      "thetaBS": "",
-      "thetaPA": "",
-      "tradeId": "3101794377",
-      "uTime": "1795141848054",
-      "upl": "28.645879999999796",
-      "uplLastPx": "29.085639999999653",
-      "uplRatio": "0.145673833141402",
-      "uplRatioLastPx": "0.1479101590934162",
-      "usdPx": "0.99887",
-      "vegaBS": "",
-      "vegaPA": ""
-    }
-  },
-  "summary_message_id": 938,
+  "positions": {},
+  "summary_message_id": 940,
   "thread_root_message_id": {
     "SOL-USDT-SWAP|long": 615,
     "APR-USDT-SWAP|long": 485,
     "HYPE-USDT-SWAP|long": 710,
     "BCH-USDT-SWAP|long": 763,
     "ZEC-USDT-SWAP|long": 780,
-    "XRP-USDT-SWAP|long": 788,
-    "BTC-USDT-SWAP|long": 934
+    "XRP-USDT-SWAP|long": 788
   },
-  "last_bill_id": "4115097020275806208",
-  "last_base_eq": 576.2927834114264,
+  "last_bill_id": "4115286321261367299",
+  "last_base_eq": 591.2061258484395,
   "entry_ts": {
     "SOL-USDT-SWAP|long": "1793780162748",
     "APR-USDT-SWAP|long": "1793332594243",
     "HYPE-USDT-SWAP|long": "1794030721201",
     "BCH-USDT-SWAP|long": "1794305293460",
     "ZEC-USDT-SWAP|long": "1794357352470",
-    "XRP-USDT-SWAP|long": "1794393642213",
-    "BTC-USDT-SWAP|long": "1795122133951"
+    "XRP-USDT-SWAP|long": "1794393642213"
   },
   "chapter_count": {
     "SOXL-USDT-SWAP|long": 1,
@@ -99,8 +27,8 @@
   },
   "pnl": {
     "started_at": 1791512976872,
-    "total": -5612.543916101585,
-    "cursor": 1795104751589,
+    "total": -5599.630394302961,
+    "cursor": 1795147489663,
     "hist": {
       "3861114737602252801:1791207790301": {
         "r": -1460.798009770901,
@@ -2363,6 +2291,12 @@
         "c": 4.63,
         "u": 1795104751589,
         "f": true
+      },
+      "3672867197426786304:1795122133950": {
+        "r": 12.913521798624425,
+        "c": 9.56,
+        "u": 1795147489663,
+        "f": true
       }
     },
     "events": [
@@ -3259,6 +3193,12 @@
         "d": 22.8580379462973,
         "inst": "BTC-USDT-SWAP",
         "dir": "short"
+      },
+      {
+        "t": 1795147489663,
+        "d": 12.913521798624425,
+        "inst": "BTC-USDT-SWAP",
+        "dir": "long"
       }
     ],
     "trades": [
@@ -4396,6 +4336,14 @@
         "dir": "short",
         "lever": "30.0",
         "pnl": 22.8580379462973,
+        "type": "2"
+      },
+      {
+        "t": 1795147489663,
+        "inst": "BTC-USDT-SWAP",
+        "dir": "long",
+        "lever": "30.0",
+        "pnl": 12.913521798624425,
         "type": "2"
       }
     ],
