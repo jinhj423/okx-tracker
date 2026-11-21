@@ -1,96 +1,24 @@
 {
   "initialized": true,
-  "positions": {
-    "BTC-USDT-SWAP|long": {
-      "adl": "1",
-      "availPos": "20.33",
-      "avgPx": "60382.2857353664535171",
-      "baseBal": "",
-      "baseBorrowed": "",
-      "baseInterest": "",
-      "bePx": "60433.136654030895",
-      "bizRefId": "",
-      "bizRefType": "",
-      "cTime": "1795185790792",
-      "ccy": "USDT",
-      "clSpotInUseAmt": "",
-      "closeAllFlag": "0",
-      "closeOrderAlgo": [],
-      "deltaBS": "",
-      "deltaPA": "",
-      "estMaxWin": "",
-      "fee": "-4.907386746",
-      "fundingFee": "0.712423322399846",
-      "gammaBS": "",
-      "gammaPA": "",
-      "hedgedPos": "",
-      "idxPx": "56833.5",
-      "imr": "384.8787503333333",
-      "instId": "BTC-USDT-SWAP",
-      "instType": "SWAP",
-      "interest": "",
-      "last": "56789.8",
-      "lever": "30",
-      "liab": "",
-      "liabCcy": "",
-      "liqPenalty": "0",
-      "liqPx": "56159.48009282134",
-      "margin": "",
-      "markPx": "56794.7",
-      "maxSpotInUseAmt": "",
-      "mgnMode": "cross",
-      "mgnRatio": "3.474258328080941",
-      "mmr": "46.18545003999999",
-      "nonSettleAvgPx": "",
-      "notionalUsd": "11526.0409119824",
-      "optVal": "",
-      "pendingCloseOrdLiabVal": "",
-      "pnl": "0",
-      "pos": "20.33",
-      "posCcy": "",
-      "posId": "3672867197426786304",
-      "posSide": "long",
-      "quoteBal": "",
-      "quoteBorrowed": "",
-      "quoteInterest": "",
-      "realizedPnl": "-4.194963423600154",
-      "ruleType": "normal",
-      "settledPnl": "",
-      "spotInUseAmt": "",
-      "spotInUseCcy": "",
-      "thetaBS": "",
-      "thetaPA": "",
-      "tradeId": "3104816154",
-      "uTime": "1795219205027",
-      "upl": "-729.3561800000001",
-      "uplLastPx": "-730.352349999999",
-      "uplRatio": "-1.782436202112091",
-      "uplRatioLastPx": "-1.7848706909395606",
-      "usdPx": "0.99824",
-      "vegaBS": "",
-      "vegaPA": ""
-    }
-  },
-  "summary_message_id": 964,
+  "positions": {},
+  "summary_message_id": 966,
   "thread_root_message_id": {
     "SOL-USDT-SWAP|long": 615,
     "APR-USDT-SWAP|long": 485,
     "HYPE-USDT-SWAP|long": 710,
     "BCH-USDT-SWAP|long": 763,
     "ZEC-USDT-SWAP|long": 780,
-    "XRP-USDT-SWAP|long": 788,
-    "BTC-USDT-SWAP|long": 949
+    "XRP-USDT-SWAP|long": 788
   },
-  "last_bill_id": "4116728179632033792",
-  "last_base_eq": 908.8864685082541,
+  "last_bill_id": "4118184380140015617",
+  "last_base_eq": 1.405742e-06,
   "entry_ts": {
     "SOL-USDT-SWAP|long": "1793780162748",
     "APR-USDT-SWAP|long": "1793332594243",
     "HYPE-USDT-SWAP|long": "1794030721201",
     "BCH-USDT-SWAP|long": "1794305293460",
     "ZEC-USDT-SWAP|long": "1794357352470",
-    "XRP-USDT-SWAP|long": "1794393642213",
-    "BTC-USDT-SWAP|long": "1795185790792"
+    "XRP-USDT-SWAP|long": "1794393642213"
   },
   "chapter_count": {
     "SOXL-USDT-SWAP|long": 1,
@@ -99,8 +27,8 @@
   },
   "pnl": {
     "started_at": 1791512976872,
-    "total": -5581.324801504203,
-    "cursor": 1795190416880,
+    "total": -6499.457565017803,
+    "cursor": 1795233858548,
     "hist": {
       "3861114737602252801:1791207790301": {
         "r": -1460.798009770901,
@@ -2363,6 +2291,12 @@
         "c": 21.03,
         "u": 1795190416880,
         "f": true
+      },
+      "3672867197426786304:1795185790792": {
+        "r": -918.1327635136001,
+        "c": 20.33,
+        "u": 1795233858548,
+        "f": true
       }
     },
     "events": [
@@ -3283,6 +3217,12 @@
         "d": -6.981565201133053,
         "inst": "BTC-USDT-SWAP",
         "dir": "short"
+      },
+      {
+        "t": 1795233858548,
+        "d": -918.1327635136001,
+        "inst": "BTC-USDT-SWAP",
+        "dir": "long"
       }
     ],
     "trades": [
@@ -4453,6 +4393,14 @@
         "lever": "30.0",
         "pnl": -6.981565201133053,
         "type": "2"
+      },
+      {
+        "t": 1795233858548,
+        "inst": "BTC-USDT-SWAP",
+        "dir": "long",
+        "lever": "30.0",
+        "pnl": -918.1327635136001,
+        "type": "3"
       }
     ],
     "eq": {
